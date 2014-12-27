@@ -1,57 +1,74 @@
 
+#include "msecret.h"
 #include "lkdf.h"
 #include "hmac_sha/hmac_sha256.h"
 #include <arpa/inet.h>
 #include <string.h>
+#include <stdio.h>
 
-void
-LKDF_SHA256_extract(
+static void
+_MSECRET_Extract(
 	uint8_t *key_out, size_t key_size,
-	const uint8_t *salt, size_t salt_size,
-	const uint8_t *info, size_t info_size,
+	uint32_t salt,
+	const char *info,
 	const uint8_t *ikm, size_t ikm_size
 ) {
-	static const uint8_t zero = 0;
-
-	uint8_t t[HMAC_SHA256_DIGEST_LENGTH];
-	uint32_t n;
-	HMAC_SHA256_CTX hmac;
-
-	for(n = 1 ; key_size != 0 ; n++) {
-		const uint32_t be_n = htonl(n);
-		int i;
-
-		HMAC_SHA256_Init(&hmac);
-		for( i = 0; i < (HMAC_SHA256_BLOCK_LENGTH - salt_size) ; i++) {
-			HMAC_SHA256_UpdateKey(&hmac, &zero, 1);
-		}
-		HMAC_SHA256_UpdateKey(&hmac, salt, salt_size);
-		HMAC_SHA256_UpdateKey(&hmac, info, info_size);
-		HMAC_SHA256_UpdateKey(&hmac, (uint8_t*)&be_n, sizeof(be_n));
-		HMAC_SHA256_EndKey(&hmac);
-
-		HMAC_SHA256_StartMessage(&hmac);
-		HMAC_SHA256_UpdateMessage(&hmac, t, n > 1 ? sizeof(t) : 0);
-		HMAC_SHA256_UpdateMessage(&hmac, ikm, ikm_size);
-		HMAC_SHA256_EndMessage(t, &hmac);
-
-		if (key_size >= HMAC_SHA256_DIGEST_LENGTH) {
-			memcpy(key_out, t, HMAC_SHA256_DIGEST_LENGTH);
-			key_size -= HMAC_SHA256_DIGEST_LENGTH;
-			key_out += HMAC_SHA256_DIGEST_LENGTH;
-		} else {
-			memcpy(key_out, t, key_size);
-			key_size = 0;
-		}
-	}
-
-	memset(t, 0, sizeof(t));
-	HMAC_SHA256_Done(&hmac);
+	salt = htonl(salt);
+	LKDF_SHA256_extract(
+		key_out, key_size,
+		(uint8_t*)&salt, sizeof(salt),
+		(const uint8_t*)info, strlen(info),
+		ikm, ikm_size
+	);
 }
 
+void
+MSECRET_Extract(
+	uint8_t *key_out, size_t key_size,
+	const char *info,
+	const uint8_t *ikm, size_t ikm_size
+) {
+	_MSECRET_Extract(
+		key_out, key_size,
+		0,
+		info,
+		ikm, ikm_size
+	);
+}
 
-#if LKDF_UNIT_TEST
-#include <stdio.h>
+void
+MSECRET_ExtractMod(
+	uint8_t *key_out,
+	uint8_t *mod_in, size_t mod_size,
+	const char *info,
+	const uint8_t *ikm, size_t ikm_size
+) {
+	uint32_t salt = 0;
+
+	// Cancel out the initial increment in the loop.
+	salt--;
+
+	// Skip any leading zero bytes in the modulous
+	while(mod_size && (*mod_in == 0)) {
+		*key_out++ = 0;
+		mod_in++;
+		mod_size--;
+	}
+
+	// Search for a key which satisfies the modulous
+	do {
+		salt++;
+		_MSECRET_Extract(
+			key_out, mod_size,
+			salt,
+			info,
+			ikm, ikm_size
+		);
+	} while( memcmp(key_out, mod_in, mod_size) > 0 );
+	fprintf(stderr,"salt=%d\n",(int)salt);
+}
+
+#if MSECRET_UNIT_TEST
 
 int
 hex_dump(FILE* file, const uint8_t *data, size_t data_len)
@@ -79,30 +96,36 @@ hex_dump(FILE* file, const uint8_t *data, size_t data_len)
 
 int
 main(void) {
+//void
+//MSECRET_ExtractMod(
 	{
-		static const uint8_t master_secret[512];
-		static const char info[] = "LKDF Test Vector";
+		static const uint8_t master_secret[512] = {0};
+		static const char info[] = "MSECRET Test Vector";
 
 		uint8_t key_out[16] = { 0 };
+		uint8_t mod_in[16] = { 0, 0x0F, 0xFF };
 
-		LKDF_SHA256_extract(
-			key_out, sizeof(key_out),
-			NULL, 0,
-			(const uint8_t*)info, sizeof(info),
+		MSECRET_ExtractMod(
+			key_out, mod_in, sizeof(mod_in),
+			info,
 			master_secret, sizeof(master_secret)
 		);
 
+		fprintf(stdout, "mod_in  = ");
+		hex_dump(stdout, mod_in, sizeof(mod_in));
+		fprintf(stdout, "\n");
 		fprintf(stdout, "key_out = ");
 		hex_dump(stdout, key_out, sizeof(key_out));
 		fprintf(stdout, "\n");
 	}
+/*
 	{
 		static const uint8_t master_secret[512];
 		static const char info[] = "LKDF Test Vector";
 
 		uint8_t key_out[48] = { 0 };
 
-		LKDF_SHA256_extract(
+		LKDF_extract(
 			key_out, sizeof(key_out),
 			NULL, 0,
 			(const uint8_t*)info, sizeof(info),
@@ -119,7 +142,7 @@ main(void) {
 
 		uint8_t key_out[48] = { 0 };
 
-		LKDF_SHA256_extract(
+		LKDF_extract(
 			key_out, sizeof(key_out),
 			NULL, 0,
 			(const uint8_t*)info, sizeof(info),
@@ -130,8 +153,7 @@ main(void) {
 		hex_dump(stdout, key_out, sizeof(key_out));
 		fprintf(stdout, "\n");
 	}
+*/
 }
 
 #endif
-
-
