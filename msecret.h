@@ -14,11 +14,13 @@ void MSECRET_Extract(
 	const uint8_t *ikm, size_t ikm_size
 );
 
+/*
 int MSECRET_ExtractToFILE(
 	FILE* key_file, size_t key_size,
 	const char *info,
 	const uint8_t *ikm, size_t ikm_size
 );
+*/
 
 void MSECRET_ExtractMod(
 	uint8_t *key_out,

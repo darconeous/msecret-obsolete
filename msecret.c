@@ -33,6 +33,7 @@ _MSECRET_Extract(
 	);
 }
 
+/*
 int
 MSECRET_ExtractToFILE(
 	FILE* key_file, size_t key_size,
@@ -49,6 +50,7 @@ MSECRET_ExtractToFILE(
 		ikm, ikm_size
 	);
 }
+*/
 
 void
 MSECRET_Extract(

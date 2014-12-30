@@ -191,24 +191,26 @@ main(int argc, char * argv[])
 		}
 	}
 
+	output_key = calloc(key_byte_length, 1);
+
+	if (output_key == NULL) {
+		fprintf(stderr, "Ran out of memory for output key\n");
+		ret = EXIT_FAILURE;
+		goto bail;
+	}
+
+	MSECRET_Extract(
+		output_key, key_byte_length,
+		key_identifier,
+		master_secret, master_secret_len
+	);
+
 	if (output_key_file == NULL) {
-		output_key = calloc(key_byte_length, 1);
-
-		MSECRET_Extract(
-			output_key, key_byte_length,
-			key_identifier,
-			master_secret, master_secret_len
-		);
-
 		hex_dump(stdout, output_key, key_byte_length, "");
 		fprintf(stdout, "\n");
 	} else {
 		int written;
-		written = MSECRET_ExtractToFILE(
-			output_key_file, key_byte_length,
-			key_identifier,
-			master_secret, master_secret_len
-		);
+		written = fwrite(output_key,key_byte_length,1,output_key_file);
 		if (written < 0) {
 			fprintf(stderr, "Write failure: %d %s\n", errno, strerror(errno));
 			ret = EXIT_FAILURE;

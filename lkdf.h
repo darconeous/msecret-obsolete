@@ -15,11 +15,13 @@ void LKDF_SHA256_extract(
 	const uint8_t *ikm, size_t ikm_size
 );
 
+/*
 int LKDF_SHA256_ExtractToFILE(
 	FILE* key_file, size_t key_size,
 	const uint8_t *salt, size_t salt_size,
 	const uint8_t *info, size_t info_size,
 	const uint8_t *ikm, size_t ikm_size
 );
+*/
 
 #endif
