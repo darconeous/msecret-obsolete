@@ -303,4 +303,7 @@ where:
     ...
     T(n) = HMAC-Hash(Salt | info |          n, T(n-1) | IKM)
 
+
+    T(n) = Hash(Salt | T(n-1) | info | n  | IKM)
+
 Where n is represented with 4 octets, for a maximum generated key length of `hlen*(2^32-1)` bytes.

@@ -49,6 +49,66 @@ LKDF_SHA256_extract(
 	HMAC_SHA256_Done(&hmac);
 }
 
+int
+LKDF_SHA256_ExtractToFILE(
+	FILE* key_file, size_t key_size,
+	const uint8_t *salt, size_t salt_size,
+	const uint8_t *info, size_t info_size,
+	const uint8_t *ikm, size_t ikm_size
+) {
+	static const uint8_t zero = 0;
+	int ret = 0;
+	uint8_t t[HMAC_SHA256_DIGEST_LENGTH];
+	uint32_t n;
+	HMAC_SHA256_CTX hmac;
+
+	for(n = 1 ; key_size != 0 ; n++) {
+		const uint32_t be_n = htonl(n);
+		int i;
+
+		HMAC_SHA256_Init(&hmac);
+		for( i = 0; i < (HMAC_SHA256_BLOCK_LENGTH - salt_size) ; i++) {
+			HMAC_SHA256_UpdateKey(&hmac, &zero, 1);
+		}
+		HMAC_SHA256_UpdateKey(&hmac, salt, salt_size);
+		HMAC_SHA256_UpdateKey(&hmac, info, info_size);
+		HMAC_SHA256_UpdateKey(&hmac, (uint8_t*)&be_n, sizeof(be_n));
+		HMAC_SHA256_EndKey(&hmac);
+
+		HMAC_SHA256_StartMessage(&hmac);
+		HMAC_SHA256_UpdateMessage(&hmac, t, n > 1 ? sizeof(t) : 0);
+		HMAC_SHA256_UpdateMessage(&hmac, ikm, ikm_size);
+		HMAC_SHA256_EndMessage(t, &hmac);
+
+		if (key_size >= HMAC_SHA256_DIGEST_LENGTH) {
+			int written;
+
+			written = fwrite(t, 1, HMAC_SHA256_DIGEST_LENGTH, key_file);
+			if (written<HMAC_SHA256_DIGEST_LENGTH) {
+				ret = -1;
+				goto bail;
+			}
+			ret += written;
+			key_size -= HMAC_SHA256_DIGEST_LENGTH;
+		} else {
+			int written;
+
+			written = fwrite(t, 1, key_size, key_file);
+			if (written<key_size) {
+				ret = -1;
+				goto bail;
+			}
+			ret += written;
+			key_size = 0;
+		}
+	}
+
+bail:
+	memset(t, 0, sizeof(t));
+	HMAC_SHA256_Done(&hmac);
+	return ret;
+}
+
 
 #if LKDF_UNIT_TEST
 #include <stdio.h>

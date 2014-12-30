@@ -22,9 +22,29 @@ _MSECRET_Extract(
 	const uint8_t *ikm, size_t ikm_size
 ) {
 	salt = htonl(salt);
+	if (info == NULL) {
+		info = "";
+	}
 	LKDF_SHA256_extract(
 		key_out, key_size,
 		(uint8_t*)&salt, sizeof(salt),
+		(const uint8_t*)info, strlen(info),
+		ikm, ikm_size
+	);
+}
+
+int
+MSECRET_ExtractToFILE(
+	FILE* key_file, size_t key_size,
+	const char *info,
+	const uint8_t *ikm, size_t ikm_size
+) {
+	if (info == NULL) {
+		info = "";
+	}
+	return LKDF_SHA256_ExtractToFILE(
+		key_file, key_size,
+		NULL, 0,
 		(const uint8_t*)info, strlen(info),
 		ikm, ikm_size
 	);
@@ -77,7 +97,6 @@ MSECRET_ExtractMod(
 		// byte. This makes the search faster.
 		key_out[0] &= enclosing_mask_uint8(mod_in[0]);
 	} while( memcmp(key_out, mod_in, mod_size) > 0 );
-	fprintf(stderr,"salt=%d\n",(int)salt);
 }
 
 #if MSECRET_UNIT_TEST
