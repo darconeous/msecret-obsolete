@@ -6,6 +6,14 @@
 #include <string.h>
 #include <stdio.h>
 
+static uint8_t
+enclosing_mask_uint8(uint8_t x) {
+	x |= (x >> 1);
+	x |= (x >> 2);
+	x |= (x >> 4);
+	return x;
+}
+
 static void
 _MSECRET_Extract(
 	uint8_t *key_out, size_t key_size,
@@ -64,6 +72,10 @@ MSECRET_ExtractMod(
 			info,
 			ikm, ikm_size
 		);
+
+		// Mask the unnecessary bits of the first
+		// byte. This makes the search faster.
+		key_out[0] &= enclosing_mask_uint8(mod_in[0]);
 	} while( memcmp(key_out, mod_in, mod_size) > 0 );
 	fprintf(stderr,"salt=%d\n",(int)salt);
 }
@@ -96,14 +108,12 @@ hex_dump(FILE* file, const uint8_t *data, size_t data_len)
 
 int
 main(void) {
-//void
-//MSECRET_ExtractMod(
 	{
-		static const uint8_t master_secret[512] = {0};
+		static const uint8_t master_secret[512] = {5};
 		static const char info[] = "MSECRET Test Vector";
 
 		uint8_t key_out[16] = { 0 };
-		uint8_t mod_in[16] = { 0, 0x0F, 0xFF };
+		uint8_t mod_in[16] = { 0, 0x08, 0xFF };
 
 		MSECRET_ExtractMod(
 			key_out, mod_in, sizeof(mod_in),
@@ -118,42 +128,6 @@ main(void) {
 		hex_dump(stdout, key_out, sizeof(key_out));
 		fprintf(stdout, "\n");
 	}
-/*
-	{
-		static const uint8_t master_secret[512];
-		static const char info[] = "LKDF Test Vector";
-
-		uint8_t key_out[48] = { 0 };
-
-		LKDF_extract(
-			key_out, sizeof(key_out),
-			NULL, 0,
-			(const uint8_t*)info, sizeof(info),
-			master_secret, sizeof(master_secret)
-		);
-
-		fprintf(stdout, "key_out = ");
-		hex_dump(stdout, key_out, sizeof(key_out));
-		fprintf(stdout, "\n");
-	}
-	{
-		static const uint8_t master_secret[512] = { 1 };
-		static const char info[] = "LKDF Test Vector";
-
-		uint8_t key_out[48] = { 0 };
-
-		LKDF_extract(
-			key_out, sizeof(key_out),
-			NULL, 0,
-			(const uint8_t*)info, sizeof(info),
-			master_secret, sizeof(master_secret)
-		);
-
-		fprintf(stdout, "key_out = ");
-		hex_dump(stdout, key_out, sizeof(key_out));
-		fprintf(stdout, "\n");
-	}
-*/
 }
 
 #endif
