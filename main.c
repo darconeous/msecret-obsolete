@@ -52,10 +52,20 @@ main(int argc, char * argv[])
 	size_t master_secret_len = 0;
 	int debug_mode = 0;
 	const char* key_identifier = NULL;
-	size_t key_byte_length = 16;
+	ssize_t key_byte_length = -1;
+	uint8_t* key_max = NULL;
 	uint8_t* output_key = NULL;
 	const char* output_key_filename = NULL;
 	FILE* output_key_file = NULL;
+
+	enum {
+		OUTPUT_UNSPECIFIED,
+		OUTPUT_RAW,
+		OUTPUT_HEX,
+		OUTPUT_DEC,
+		OUTPUT_B64,
+		OUTPUT_B32,
+	} output_format = OUTPUT_UNSPECIFIED;
 
 	BEGIN_LONG_ARGUMENTS(ret)
 	HANDLE_LONG_ARGUMENT("input")
@@ -66,12 +76,95 @@ main(int argc, char * argv[])
 	{
 		output_key_filename = argv[++i];
 	}
+	HANDLE_LONG_ARGUMENT("format-dec")
+	{
+		output_format = OUTPUT_DEC;
+	}
+	HANDLE_LONG_ARGUMENT("format-b64")
+	{
+		output_format = OUTPUT_B64;
+	}
+	HANDLE_LONG_ARGUMENT("format-b32")
+	{
+		output_format = OUTPUT_B32;
+	}
+	HANDLE_LONG_ARGUMENT("format-b16")
+	{
+		output_format = OUTPUT_HEX;
+	}
+	HANDLE_LONG_ARGUMENT("format-hex")
+	{
+		output_format = OUTPUT_HEX;
+	}
+	HANDLE_LONG_ARGUMENT("format-raw")
+	{
+		output_format = OUTPUT_RAW;
+	}
 	HANDLE_LONG_ARGUMENT("key-identifier")
 	{
 		key_identifier = argv[++i];
 	}
+	HANDLE_LONG_ARGUMENT("key-max")
+	{
+		if (key_max != NULL) {
+			fprintf(stderr, "key-max already specified\n");
+			ret = EXIT_FAILURE;
+			goto bail;
+		}
+		if (key_byte_length >= 0) {
+			fprintf(stderr, "key-byte-length already specified, you can't also specify key-max!\n");
+			ret = EXIT_FAILURE;
+			goto bail;
+		}
+		i++;
+		if ((argv[i][0] == '0') && (argv[i][1] == 'x')) {
+			// Hexidecimal maximum.
+			fprintf(stderr, "Not yet implemented.\n");
+			ret = EXIT_FAILURE;
+			goto bail;
+		} else {
+			// Probabbly a decimal maximum.
+			// Assume it fits within 32 bits for now.
+			uint32_t max = (uint32_t)strtol(argv[i], NULL, 10);
+			if (max == 0) {
+				fprintf(stderr, "Bad maximum value of zero\n");
+				ret = EXIT_FAILURE;
+				goto bail;
+			}
+			key_max = calloc(sizeof(uint32_t), 1);
+			if (key_max == NULL) {
+				fprintf(stderr, "Malloc failure\n");
+				ret = EXIT_FAILURE;
+				goto bail;
+			}
+			if (max <= 0xFF) {
+				key_max[0] = (max & 0xFF);
+				key_byte_length = 1;
+			} else if (max <= 0xFFFF) {
+				key_max[0] = ((max & 0xFF00)>>8);
+				key_max[1] = (max & 0xFF);
+				key_byte_length = 2;
+			} else if (max <= 0xFFFFFF) {
+				key_max[0] = ((max & 0xFF0000)>>16);
+				key_max[1] = ((max & 0xFF00)>>8);
+				key_max[2] = (max & 0xFF);
+				key_byte_length = 3;
+			} else {
+				key_max[0] = ((max & 0xFF000000)>>24);
+				key_max[1] = ((max & 0xFF0000)>>16);
+				key_max[2] = ((max & 0xFF00)>>8);
+				key_max[3] = (max & 0xFF);
+				key_byte_length = 4;
+			}
+		}
+	}
 	HANDLE_LONG_ARGUMENT("key-length")
 	{
+		if (key_max != NULL) {
+			fprintf(stderr, "key-max already specified, you can't also specify key-length!\n");
+			ret = EXIT_FAILURE;
+			goto bail;
+		}
 		key_byte_length = (size_t)strtoll(argv[++i], NULL, 0);
 	}
 	HANDLE_LONG_ARGUMENT("debug") {
@@ -96,6 +189,11 @@ main(int argc, char * argv[])
 	}
 	HANDLE_SHORT_ARGUMENT('l')
 	{
+		if (key_max != NULL) {
+			fprintf(stderr, "key-max already specified, you can't also specify key-length!\n");
+			ret = EXIT_FAILURE;
+			goto bail;
+		}
 		key_byte_length = strtol(argv[++i], NULL, 0);
 	}
 	HANDLE_SHORT_ARGUMENT('o')
@@ -126,6 +224,11 @@ main(int argc, char * argv[])
 		break;
 	}
 	END_ARGUMENTS
+
+	if (key_byte_length == -1) {
+		// Default key length is 128 bit (16 bytes).
+		key_byte_length = 16;
+	}
 
 	if (master_secret_filename == NULL) {
 		fprintf(stderr, "Filename of master secret not specified.\n");
@@ -178,6 +281,9 @@ main(int argc, char * argv[])
 	}
 
 	if (output_key_filename != NULL) {
+		if (output_format == OUTPUT_UNSPECIFIED) {
+			output_format = OUTPUT_RAW;
+		}
 		if (0 == strcmp(output_key_filename, "-")) {
 			output_key_file = stdout;
 		} else {
@@ -189,6 +295,11 @@ main(int argc, char * argv[])
 			ret = EXIT_FAILURE;
 			goto bail;
 		}
+	} else {
+		if (output_format == OUTPUT_UNSPECIFIED) {
+			output_format = OUTPUT_HEX;
+		}
+		output_key_file = stdout;
 	}
 
 	output_key = calloc(key_byte_length, 1);
@@ -199,24 +310,66 @@ main(int argc, char * argv[])
 		goto bail;
 	}
 
-	MSECRET_Extract(
-		output_key, key_byte_length,
-		key_identifier,
-		master_secret, master_secret_len
-	);
+	if (key_max == NULL) {
+		// Extracts a random key with a length of
+		// key_byte_length.
+		MSECRET_Extract(
+			output_key, key_byte_length,
+			key_identifier,
+			master_secret, master_secret_len
+		);
+	} else {
+		// Extracts a key that is less than or
+		// equal to the specific value of key_max.
+		MSECRET_ExtractMod(
+			output_key, key_max, key_byte_length,
+			key_identifier,
+			master_secret, master_secret_len
+		);
+	}
 
-	if (output_key_file == NULL) {
+	switch (output_format) {
+	case OUTPUT_DEC:
+		{
+			if (key_byte_length <= 4) {
+				uint32_t v = 0;
+				memcpy(((uint8_t*)&v)+4-key_byte_length, output_key, key_byte_length);
+				v = htonl(v);
+				fprintf(stdout, "%04u\n", v);
+/*
+			} else if (key_byte_length <= 8) {
+				uint64_t v = 0;
+				memcpy(((uint8_t*)&v)+8-key_byte_length, output_key, key_byte_length);
+				v = htonll(v);
+				fprintf(stdout, "%llu\n", v);
+*/
+			} else {
+				fprintf(stderr, "Key size too large for decimal mode\n");
+				ret = EXIT_FAILURE;
+			}
+		}
+		break;
+	case OUTPUT_HEX:
 		hex_dump(stdout, output_key, key_byte_length, "");
 		fprintf(stdout, "\n");
-	} else {
-		int written;
-		written = fwrite(output_key,key_byte_length,1,output_key_file);
-		if (written < 0) {
-			fprintf(stderr, "Write failure: %d %s\n", errno, strerror(errno));
-			ret = EXIT_FAILURE;
-		} else {
-			fprintf(stderr, "%d bytes written\n", written);
+		break;
+	case OUTPUT_RAW:
+		{
+			int written;
+			written = fwrite(output_key,key_byte_length,1,output_key_file);
+			if (written < 0) {
+				fprintf(stderr, "Write failure: %d %s\n", errno, strerror(errno));
+				ret = EXIT_FAILURE;
+			} else {
+				fprintf(stderr, "%d bytes written\n", written);
+			}
 		}
+		break;
+	default:
+		fprintf(stderr, "Unknown output format\n");
+		ret = EXIT_FAILURE;
+		goto bail;
+		break;
 	}
 
 bail:
