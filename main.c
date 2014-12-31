@@ -57,6 +57,7 @@ main(int argc, char * argv[])
 	uint8_t* output_key = NULL;
 	const char* output_key_filename = NULL;
 	FILE* output_key_file = NULL;
+	unsigned int zero_fill_digits = 0;
 
 	enum {
 		OUTPUT_UNSPECIFIED,
@@ -103,6 +104,10 @@ main(int argc, char * argv[])
 	HANDLE_LONG_ARGUMENT("key-identifier")
 	{
 		key_identifier = argv[++i];
+	}
+	HANDLE_LONG_ARGUMENT("dec-zero-fill")
+	{
+		zero_fill_digits = (unsigned int)strtol(argv[++i], NULL, 0);
 	}
 	HANDLE_LONG_ARGUMENT("key-max")
 	{
@@ -333,9 +338,18 @@ main(int argc, char * argv[])
 		{
 			if (key_byte_length <= 4) {
 				uint32_t v = 0;
+				char* format_string = NULL;
 				memcpy(((uint8_t*)&v)+4-key_byte_length, output_key, key_byte_length);
 				v = htonl(v);
-				fprintf(stdout, "%04u\n", v);
+				asprintf(&format_string,"%%0%du\n", zero_fill_digits);
+				if (format_string == NULL) {
+					fprintf(stderr, "aprintf failed\n");
+					ret = EXIT_FAILURE;
+					goto bail;
+				}
+				fprintf(stdout, format_string, v);
+				free(format_string);
+
 /*
 			} else if (key_byte_length <= 8) {
 				uint64_t v = 0;
