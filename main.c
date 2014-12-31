@@ -264,8 +264,8 @@ main(int argc, char * argv[])
 	while(!feof(master_secret_file) && !ferror(master_secret_file)) {
 		ssize_t read_bytes;
 		read_bytes = fread(
-			master_secret, MASTER_SECRET_BLOCK_SIZE,
-			1, master_secret_file
+			master_secret, 1, MASTER_SECRET_BLOCK_SIZE,
+			master_secret_file
 		);
 		if (read_bytes < 0) {
 			fprintf(stderr, "call to fread of \"%s\" failed: errno=%d\n", master_secret_filename, errno);

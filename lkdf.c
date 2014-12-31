@@ -25,6 +25,13 @@ LKDF_SHA256_extract(
 	uint32_t n;
 	HMAC_SHA256_CTX hmac;
 
+/*
+	fprintf(stderr, "key_size: %d\n", (int)key_size);
+	fprintf(stderr, "salt_size: %d\n", (int)salt_size);
+	fprintf(stderr, "info_size: %d\n", (int)info_size);
+	fprintf(stderr, "ikm_size: %d\n", (int)ikm_size);
+*/
+
 	// --------------------------------------------------------
 	// Calculate selector --- `HMAC(salt, info)`
 
