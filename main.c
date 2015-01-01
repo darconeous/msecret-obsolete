@@ -41,6 +41,22 @@ print_version()
 	printf("msecret v0.0\n");
 }
 
+static arg_list_item_t option_list[] = {
+	{ 'h', "help",	NULL, "Print Help"				},
+	{ 'v', "version", NULL, "Print Version Information" },
+	{ 'd', "debug", NULL, "Enable debugging mode"	},
+	{ 'i', "input",	NULL, "Input file (use '-' for stdin)"				},
+	{ 'o', "output",	NULL, "Output file (stdout is default)"				},
+	{ 'k', "key-identifier",	"KID", "Key identifier (default is empty string)"				},
+	{ 0, "key-max",	"n", "Maximum numerical value for key"				},
+	{ 'l', "key-length",	"bytes", "key length, in bytes"				},
+	{   0, "format-bin",	NULL, "Output raw binary key"				},
+	{   0, "format-hex",	NULL, "Output hexidecimal key"				},
+	{   0, "format-dec",	NULL, "Output decimal key"				},
+	{ 0, "dec-zero-fill", "X", "Zero fill key to X places"},
+	{ 0 }
+};
+
 int
 main(int argc, char * argv[])
 {
@@ -182,8 +198,8 @@ main(int argc, char * argv[])
 	}
 	HANDLE_LONG_ARGUMENT("help") {
 		print_version();
-		//print_arg_list_help(option_list,
-		//	argv[0],"[args]");
+		print_arg_list_help(option_list,
+			argv[0],"[args]");
 		ret = EXIT_FAILURE;
 		goto bail;
 	}
@@ -220,8 +236,8 @@ main(int argc, char * argv[])
 	}
 	HANDLE_SHORT_ARGUMENT2('h', '?') {
 		print_version();
-		//print_arg_list_help(option_list,
-		//	argv[0], "[args]");
+		print_arg_list_help(option_list,
+			argv[0], "[args]");
 		ret = EXIT_FAILURE;
 		goto bail;
 	}

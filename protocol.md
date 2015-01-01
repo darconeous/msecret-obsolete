@@ -1,3 +1,7 @@
+
+Warning: This document is practically a stream-of-consciousness, and several
+parts are out-of-date.
+
 # Master Secret Protocol #
 
 This document describes the protocol and procedures for safely using a

@@ -25,12 +25,12 @@ LKDF_SHA256_extract(
 	uint32_t n;
 	HMAC_SHA256_CTX hmac;
 
-/*
+#ifdef LKDF_DEBUG
 	fprintf(stderr, "key_size: %d\n", (int)key_size);
 	fprintf(stderr, "salt_size: %d\n", (int)salt_size);
 	fprintf(stderr, "info_size: %d\n", (int)info_size);
 	fprintf(stderr, "ikm_size: %d\n", (int)ikm_size);
-*/
+#endif
 
 	// --------------------------------------------------------
 	// Calculate selector --- `HMAC(salt, info)`
@@ -93,16 +93,36 @@ LKDF_SHA256_extract(
 			HMAC_SHA256_StartMessage(&hmac);
 
 			// Output feedback from previous output key block
-			HMAC_SHA256_UpdateMessage(&hmac, key_out - HMAC_SHA256_DIGEST_LENGTH, n > 1 ? sizeof(buf) : 0);
+			HMAC_SHA256_UpdateMessage(
+				&hmac,
+				key_out - HMAC_SHA256_DIGEST_LENGTH,
+				(n > 1)
+					? sizeof(buf)
+					: 0
+			);
 
 			// IKM block counter (Big-endian)
-			HMAC_SHA256_UpdateMessage(&hmac, (uint8_t*)&ikm_n, sizeof(ikm_n));
+			HMAC_SHA256_UpdateMessage(
+				&hmac,
+				(uint8_t*)&ikm_n,
+				sizeof(ikm_n)
+			);
 
 			// Data from IKM block
-			HMAC_SHA256_UpdateMessage(&hmac, ikm_idx, ikm_left>HMAC_SHA256_DIGEST_LENGTH?HMAC_SHA256_DIGEST_LENGTH:ikm_left);
+			HMAC_SHA256_UpdateMessage(
+				&hmac,
+				ikm_idx,
+				(ikm_left > HMAC_SHA256_DIGEST_LENGTH)
+					? HMAC_SHA256_DIGEST_LENGTH
+					: ikm_left
+			);
 
 			// Output key block index (Big-endian)
-			HMAC_SHA256_UpdateMessage(&hmac, (uint8_t*)&be_n, sizeof(be_n));
+			HMAC_SHA256_UpdateMessage(
+				&hmac,
+				(uint8_t*)&be_n,
+				sizeof(be_n)
+			);
 
 			HMAC_SHA256_EndMessage(buf, &hmac);
 
