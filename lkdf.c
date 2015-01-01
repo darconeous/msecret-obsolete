@@ -79,10 +79,10 @@ LKDF_SHA256_extract(
 		memset(key_out, 0, output_block_size);
 
 		// Interate through each block of the IKM.
-		for (	ikm_idx=ikm,
-				ikm_left=ikm_size,
-				ikm_n=0
-			;	ikm_left > 0
+		for (	ikm_idx = ikm,
+				ikm_left = ikm_size,
+				ikm_n = 0
+			;	(ikm_left > 0) || (ikm_n == 0)
 			;	ikm_left -= HMAC_SHA256_DIGEST_LENGTH,
 				ikm_idx += HMAC_SHA256_DIGEST_LENGTH,
 				ikm_n++
@@ -148,6 +148,24 @@ hex_dump(FILE* file, const uint8_t *data, size_t data_len)
 int
 main(void) {
 	{
+		static const uint8_t master_secret[0]; // Empty master secret
+		static const char info[] = "LKDF Test Vector";
+
+		uint8_t key_out[16] = { 0 };
+
+		LKDF_SHA256_extract(
+			key_out, sizeof(key_out),
+			NULL, 0,
+			(const uint8_t*)info, strlen(info),
+			master_secret, sizeof(master_secret)
+		);
+
+		fprintf(stdout, "Empty master secret, empty salt\n");
+		fprintf(stdout, "\tkey_out = ");
+		hex_dump(stdout, key_out, sizeof(key_out));
+		fprintf(stdout, "\n");
+	}
+	{
 		static const uint8_t master_secret[512]; // All zeros
 		static const char info[] = "LKDF Test Vector";
 
@@ -160,7 +178,8 @@ main(void) {
 			master_secret, sizeof(master_secret)
 		);
 
-		fprintf(stdout, "key_out = ");
+		fprintf(stdout, "Master secret with 512 zeros, empty salt\n");
+		fprintf(stdout, "\tkey_out = ");
 		hex_dump(stdout, key_out, sizeof(key_out));
 		fprintf(stdout, "\n");
 	}
@@ -177,7 +196,8 @@ main(void) {
 			master_secret, sizeof(master_secret)
 		);
 
-		fprintf(stdout, "key_out = ");
+		fprintf(stdout, "Master secret with 512 zeros, empty salt\n");
+		fprintf(stdout, "\tkey_out = ");
 		hex_dump(stdout, key_out, sizeof(key_out));
 		fprintf(stdout, "\n");
 	}
@@ -194,7 +214,8 @@ main(void) {
 			master_secret, sizeof(master_secret)
 		);
 
-		fprintf(stdout, "key_out = ");
+		fprintf(stdout, "Master secret with 0x80 and 511 zeros, empty salt\n");
+		fprintf(stdout, "\tkey_out = ");
 		hex_dump(stdout, key_out, sizeof(key_out));
 		fprintf(stdout, "\n");
 	}

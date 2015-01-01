@@ -33,25 +33,6 @@ _MSECRET_Extract(
 	);
 }
 
-/*
-int
-MSECRET_ExtractToFILE(
-	FILE* key_file, size_t key_size,
-	const char *info,
-	const uint8_t *ikm, size_t ikm_size
-) {
-	if (info == NULL) {
-		info = "";
-	}
-	return LKDF_SHA256_ExtractToFILE(
-		key_file, key_size,
-		NULL, 0,
-		(const uint8_t*)info, strlen(info),
-		ikm, ikm_size
-	);
-}
-*/
-
 void
 MSECRET_Extract(
 	uint8_t *key_out, size_t key_size,
@@ -88,6 +69,7 @@ MSECRET_ExtractMod(
 	// Search for a key which satisfies the modulous
 	do {
 		salt++;
+
 		_MSECRET_Extract(
 			key_out, mod_size,
 			salt,
@@ -130,7 +112,7 @@ hex_dump(FILE* file, const uint8_t *data, size_t data_len)
 int
 main(void) {
 	{
-		static const uint8_t master_secret[512] = {5};
+		static const uint8_t master_secret[512] = {0};
 		static const char info[] = "MSECRET Test Vector";
 
 		uint8_t key_out[16] = { 0 };
