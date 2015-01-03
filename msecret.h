@@ -24,7 +24,7 @@ int MSECRET_ExtractToFILE(
 
 void MSECRET_ExtractMod(
 	uint8_t *key_out,
-	uint8_t *mod_in, size_t mod_size,
+	uint8_t *max_in, size_t mod_size,
 	const char *info,
 	const uint8_t *ikm, size_t ikm_size
 );

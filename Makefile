@@ -1,10 +1,10 @@
 
 
+CFLAGS=-g -O0
 
-gcc -DMSECRET_UNIT_TEST=1 lkdf.c hmac_sha/hmac_sha256.c hmac_sha/sha2.c msecret.c -o msecret && ./msecret
-
+all: msecret ecollect
 msecret: main.o lkdf.o msecret.o lkdf.o hmac_sha/hmac_sha256.o hmac_sha/sha2.o help.o
-
+ecollect: ecollect.o hmac_sha/sha2.o
 test: lkdf-test msecret-test
 	./lkdf-test
 

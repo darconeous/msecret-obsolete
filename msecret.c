@@ -50,7 +50,7 @@ MSECRET_Extract(
 void
 MSECRET_ExtractMod(
 	uint8_t *key_out,
-	uint8_t *mod_in, size_t mod_size,
+	uint8_t *max_in, size_t mod_size,
 	const char *info,
 	const uint8_t *ikm, size_t ikm_size
 ) {
@@ -60,9 +60,9 @@ MSECRET_ExtractMod(
 	salt--;
 
 	// Skip any leading zero bytes in the modulous
-	while(mod_size && (*mod_in == 0)) {
+	while(mod_size && (*max_in == 0)) {
 		*key_out++ = 0;
-		mod_in++;
+		max_in++;
 		mod_size--;
 	}
 
@@ -79,8 +79,8 @@ MSECRET_ExtractMod(
 
 		// Mask the unnecessary bits of the first
 		// byte. This makes the search faster.
-		key_out[0] &= enclosing_mask_uint8(mod_in[0]);
-	} while( memcmp(key_out, mod_in, mod_size) > 0 );
+		key_out[0] &= enclosing_mask_uint8(max_in[0]);
+	} while( memcmp(key_out, max_in, mod_size) > 0 );
 }
 
 #if MSECRET_UNIT_TEST
@@ -116,16 +116,16 @@ main(void) {
 		static const char info[] = "MSECRET Test Vector";
 
 		uint8_t key_out[16] = { 0 };
-		uint8_t mod_in[16] = { 0, 0x08, 0xFF };
+		uint8_t max_in[16] = { 0, 0x08, 0xFF };
 
 		MSECRET_ExtractMod(
-			key_out, mod_in, sizeof(mod_in),
+			key_out, max_in, sizeof(max_in),
 			info,
 			master_secret, sizeof(master_secret)
 		);
 
-		fprintf(stdout, "mod_in  = ");
-		hex_dump(stdout, mod_in, sizeof(mod_in));
+		fprintf(stdout, "max_in  = ");
+		hex_dump(stdout, max_in, sizeof(max_in));
 		fprintf(stdout, "\n");
 		fprintf(stdout, "key_out = ");
 		hex_dump(stdout, key_out, sizeof(key_out));
