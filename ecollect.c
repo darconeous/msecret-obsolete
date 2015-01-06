@@ -100,12 +100,23 @@ hex_dump(FILE* file, const uint8_t *data, size_t data_len, const char* sep)
 	return ret;
 }
 
+static int gInterrupted;
+static void
+signal_handler(int sig) {
+	gInterrupted = 1;
+	fprintf(stderr, "Caught signal %d\n", sig);
+	signal(sig, NULL);
+}
+
 int
 main(int argc, char * argv[])
 {
 	int fd = -1;
 	uint8_t *epool = NULL;
 	int epool_size = 0;
+	size_t bytes_consumed = 0;
+	signal(SIGINT, &signal_handler);
+	signal(SIGTERM, &signal_handler);
 	if (argc < 2) {
 		fprintf(stderr,"syntax: %s <pool-file> [input-file]\n",argv[0]);
 		exit(EXIT_FAILURE);
@@ -127,7 +138,7 @@ main(int argc, char * argv[])
 		stdin = fopen(argv[2], "r");
 		fprintf(stderr,"opened %s\n",argv[2]);
 	}
-	while(!feof(stdin) && !ferror(stdin)) {
+	while(!feof(stdin) && !ferror(stdin) && !gInterrupted) {
 		uint8_t buffer[512] = {};
 		int len;
 		len = fread(buffer, 1, sizeof(buffer), stdin);
@@ -138,9 +149,10 @@ main(int argc, char * argv[])
 		}
 
 		add_entropy(epool, epool_size, buffer, len);
+		bytes_consumed += len;
 	}
 
-	fprintf(stderr, "done.\n");
+	fprintf(stderr, "done. Consumed %llu bytes\n", bytes_consumed);
 //	hex_dump(stderr, epool, epool_size, "");
 	fprintf(stderr, "\n");
 	return EXIT_SUCCESS;
