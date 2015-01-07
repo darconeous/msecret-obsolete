@@ -311,3 +311,48 @@ where:
     T(n) = Hash(Salt | T(n-1) | info | n  | IKM)
 
 Where n is represented with 4 octets, for a maximum generated key length of `hlen*(2^32-1)` bytes.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+---------------------
+
+### RSA Key Generation ###
+
+To calculate an RSA key of nlen size, generate a random value
+with an empty salt that is twice the size as nlen.
+
+`p` and `q` are derived from the most and least (respectively)
+significant halves of the random value, and refined using the following
+algorithm:
+
+    p_len = floor(nlen/2)
+	q_len = (nlen-plen)
+
+1. Set the two most significant bits and the least significant bit.
+2. If the number is not prime, goto 1.
+3. ???
+4. PR0FIT!!1
+
+65537 is always assumed to be the public exponent.
+
+Alternatives:
+
+* FIPS 18.6 Appendix B.3.2.2
+* Versile Platform 0.8.1-DRAFT 14.2.2 Identity Generation
