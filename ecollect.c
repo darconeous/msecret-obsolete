@@ -35,7 +35,7 @@ add_entropy(uint8_t* pool, int pool_len, const uint8_t* entropy, int entropy_len
 		int offset = i*entropy_len;
 		int len = entropy_len;
 		if (offset+len > pool_len) {
-			len = pool_len - (offset+entropy_len);
+			len = pool_len - offset;
 		}
 		if (len < 0) {
 			break;
@@ -59,12 +59,15 @@ add_entropy(uint8_t* pool, int pool_len, const uint8_t* entropy, int entropy_len
 		for (i = 0; i < pool_len/SHA256_DIGEST_LENGTH; i++) {
 			int offset = i*SHA256_DIGEST_LENGTH;
 			int len = SHA256_DIGEST_LENGTH*2;
+
 			if (offset+len > pool_len) {
-				len = pool_len - (offset+len);
+				len = pool_len - offset;
 			}
-			if (len < 0) {
+
+			if (len < SHA256_DIGEST_LENGTH) {
 				break;
 			}
+
 			SHA256_Init(&hash);
 			SHA256_Update(&hash, pool+offset, len);
 			SHA256_Final(hashval, &hash);
