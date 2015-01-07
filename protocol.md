@@ -352,7 +352,63 @@ algorithm:
 
 65537 is always assumed to be the public exponent.
 
+Consider an option for using Lim and Lee algorithm.
+
 Alternatives:
 
 * FIPS 18.6 Appendix B.3.2.2
 * Versile Platform 0.8.1-DRAFT 14.2.2 Identity Generation
+
+
+
+
+--------------------------------------
+
+Methods to deterministically calculate the following
+types of data from the master secret are/will-be defined:
+
+* StringOfBytes
+* IntegerLessThanX
+* Large Prime Number
+    * PrimeNormal
+    * PrimeSafe
+    * PrimeStrong
+    * PrimeLeeLim
+* RSAPrivateKey
+* DSAParameters
+* ECPrivateKey
+
+When requesting each class of random value, you specify a key identifier and salt. The key identifier and salt are compressed using HMAC-SHA256 into a 256-bit key selector:
+
+	KeySelector = HMAC_SHA256(Salt, KeyIdentifierString)
+
+Ultimately, every class of random value ultimately uses the StringOfBytes class recursively to extract random values from the master secret. StringOfBytes uses the key selector directly, but other classes generally modify the key selector before passing it along to StringOfBytes.
+
+IntergerLessThanX will pass the given key selector along to StringOfBytes directly on the first attempt. If the attempt fails (the calculated value was too large), the key selector is permuted using `HMAC-SHA256(KeySelector, attemptcount)` and another attempt is made. This continues until a satisfactory number is calculated.
+
+The prime classes, as well as the ECPrivateKey class, always permute the key selector with the name of the class before calling into subclasses:
+
+    NewKeySelector = HMAC_SHA256(GivenKeySelector, "NormalPrime:1024")
+
+The RSA class permutes the key selector to generate different keys for P and Q:
+
+    NewKeySelector_P = HMAC_SHA256(GivenKeySelector, "RSAPrivateKey:2048:p")
+    NewKeySelector_Q = HMAC_SHA256(GivenKeySelector, "RSAPrivateKey:2048:q")
+
+Calculating DSAParameters uses a similar construct.
+
+The actual key identifier is an arbitrary string of bytes. While it could be anything, I recommend using a normalized case-folded UTF8 encoding. This string could be...
+
+* A URL.
+* A human-readable description.
+* A base64 hash.
+* A passphrase.
+
+Keeping a list of these key identifiers somewhere is generally a good idea. It is also a good idea to develop a system for naming. Here are some examples:
+
+* `PGPKey:John Doe:1`
+* `X509:Acme CA Root`
+* `BIP0032:Seed:John Doe`
+* `SuperSecret:Delegate`
+
+You can generate child SuperSecrets which can allow you to form a hierarchy of key generation capability.
