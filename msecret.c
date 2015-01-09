@@ -49,6 +49,7 @@ void MSECRET_Extract_Integer(
 ) {
 	uint32_t salt = 0, be_salt = 0;
 	MSECRET_KeySelector new_key_selector;
+	HMAC_SHA256_CTX hmac;
 
 	// Cancel out the initial increment in the loop.
 	salt--;
@@ -65,16 +66,15 @@ void MSECRET_Extract_Integer(
 		salt++;
 		be_salt = htonl(salt);
 
-		if (salt == 0) {
-			// For the first try we just pass it thru
-			memcpy(new_key_selector, key_selector, sizeof(new_key_selector));
-		} else {
-			MSECRET_CalcKeySelector(
-				new_key_selector,
-				(uint8_t*)&be_salt, sizeof(be_salt),
-				(const char*)key_selector, sizeof(MSECRET_KeySelector)
-			);
-		}
+		HMAC_SHA256_Init(&hmac);
+		HMAC_SHA256_UpdateKey(&hmac, key_selector, sizeof(MSECRET_KeySelector));
+		HMAC_SHA256_EndKey(&hmac);
+		HMAC_SHA256_StartMessage(&hmac);
+		HMAC_SHA256_UpdateMessage(&hmac, "Integer", 7);
+		HMAC_SHA256_UpdateMessage(&hmac, max_in, mod_size);
+		HMAC_SHA256_UpdateMessage(&hmac, (uint8_t*)&be_salt, sizeof(be_salt));
+		HMAC_SHA256_EndMessage(new_key_selector, &hmac);
+
 		MSECRET_Extract_Bytes(
 			key_out, mod_size,
 			new_key_selector,
@@ -85,7 +85,6 @@ void MSECRET_Extract_Integer(
 		// byte. This makes the search faster.
 		key_out[0] &= enclosing_mask_uint8(max_in[0]);
 
-		assert(salt < 2048);
 	} while( memcmp(key_out, max_in, mod_size) > 0 );
 }
 
