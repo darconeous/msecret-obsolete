@@ -1,6 +1,5 @@
-
-Warning: This document is practically a stream-of-consciousness, and several
-parts are out-of-date.
+Warning: This document is practically a stream-of-consciousness, and
+several parts are out-of-date.
 
 # Master Secret Protocol #
 
@@ -94,8 +93,8 @@ Is pseudocode:
         Nonce = Nonce + 1;
     } while(DerivedKey > MOD);
 
-For cases where `MOD` is equal to `2^n-1` where `n` is a multiple of 8,
-a much more simplified version may be used:
+For cases where `MOD` is equal to `2^n-1` where `n` is a multiple of
+8, a much more simplified version may be used:
 
     DerivedKey = 0;
     for(i = 0; i < n; i++) {
@@ -146,9 +145,9 @@ are calculated deterministically using DSID `internal:shamir?v=V`,
 where `V` is the current "protection version" (described below).
 
 If some shares are compromised, the remaining shares can be collected
-and re-calculated to make the compromised shares useless. This is
-done by incrementing the "protection version" and re-commissioning
-all cards.
+and re-calculated to make the compromised shares useless. This is done
+by incrementing the "protection version" and re-commissioning all
+cards.
 
 This is how the mechanism works.
 
@@ -192,15 +191,16 @@ Any secure element in the group may be used to reconstruct the master
 secret (with the help of other secure elements)
 
 The matrix generated for Blom's scheme shall use secrets generated
-from the master secret, using the following DSID `internal:blom?v=V;i=I;j=J`, where
-`I` and `J` are decimal indexes of the matrix and `V` is the protection version. MOD is set to the same
+from the master secret, using the following DSID
+`internal:blom?v=V;i=I;j=J`, where `I` and `J` are decimal indexes of
+the matrix and `V` is the protection version. MOD is set to the same
 `p` as NIST curve P-256: `2^256 - 2^224 + 2^192 + 2^96 - 1`. The
 entire matrix need not be stored in memory, but may be used as needed.
 
 Note that any DSID that is prefixed with `internal:` is only allowed
-to be calculated internally within the secure element. Any attempts
-to fetch the value associated with such a DSID from an external
-interface MUST fail.
+to be calculated internally within the secure element. Any attempts to
+fetch the value associated with such a DSID from an external interface
+MUST fail.
 
 When a new card is being provisioned, a new public/private Blom
 key-pair is generated, along with `n` slices. This data is optionally
@@ -228,19 +228,14 @@ We have two cards: "Master" and "Slave".
     `ChallengeS`.
  *  The master
 
-
-
-
-
-
 ## Proposed parameters ##
 
-* `n` (Number of shares) = 13
-* `k` (Shares needed) = 5
-* `p_blom` = `2^256 - 2^224 + 2^192 + 2^96 - 1` (256-bits)
-* `mslen` = 4096 bits (512 bytes)
-* `HMAC` = HMAC-SHA256
-* `hlen` = 256
+ *  `n` (Number of shares) = 13
+ *  `k` (Shares needed) = 5
+ *  `p_blom` = `2^256 - 2^224 + 2^192 + 2^96 - 1` (256-bits)
+ *  `mslen` = 4096 bits (512 bytes)
+ *  `HMAC` = HMAC-SHA256
+ *  `hlen` = 256
 
 Shares are numbered 0 thru 31.
 
@@ -248,49 +243,42 @@ Shares are numbered 0 thru 31.
 
 Eight initial cards:
 
-* Card 0: 3/5, 00 01 02 (~1600 bytes)
-* Card 1: 2/5, 03 04 (~1100 bytes)
-* Card 2: 2/5, 05 06 (~1100 bytes)
-* Card 3: 2/5, 07 08 (~1100 bytes)
-* Card 4: 1/5, 09 (~600 bytes)
-* Card 5: 1/5, 10 (~600 bytes)
-* Card 6: 1/5, 11 (~600 bytes)
-* Card 7: 1/5, 12 (~600 bytes)
+ *  Card 0: 3/5, 00 01 02 (~1600 bytes)
+ *  Card 1: 2/5, 03 04 (~1100 bytes)
+ *  Card 2: 2/5, 05 06 (~1100 bytes)
+ *  Card 3: 2/5, 07 08 (~1100 bytes)
+ *  Card 4: 1/5, 09 (~600 bytes)
+ *  Card 5: 1/5, 10 (~600 bytes)
+ *  Card 6: 1/5, 11 (~600 bytes)
+ *  Card 7: 1/5, 12 (~600 bytes)
 
+---
 
-
-
-
-
-
-
-
------------------------
-
-
-Most key derivation functions (KDFs) are not suitable for use with large
-amounts of input keying material. HKDF, for example, creates a entropy
-bottle-neck of the hash length between the "extract" and "expand" stage.
-PBKDF2 isn't really suitable, either, as it was designed for a distinct
-purpose.
+Most key derivation functions (KDFs) are not suitable for use with
+large amounts of input keying material. HKDF, for example, creates a
+entropy bottle-neck of the hash length between the "extract" and
+"expand" stage. PBKDF2 isn't really suitable, either, as it was
+designed for a distinct purpose.
 
 For example, using HKDF with HMAC-SHA256 to generate a 521-bit ECC key
 is not appropriate since the input keying material is compressed into
-just 256 bits, even if the input keying material is much larger than 521 bits.
+just 256 bits, even if the input keying material is much larger than
+521 bits.
 
-One alternative is to break up the IKM into `hlen` sized blocks and apply
-the KDF multiple times, XORing the results into the final key. This approach
-is particularly unsuited to devices with limited resources.
+One alternative is to break up the IKM into `hlen` sized blocks and
+apply the KDF multiple times, XORing the results into the final key.
+This approach is particularly unsuited to devices with limited
+resources.
 
-As such, I am proposing a new key derivation function specifically designed
-for deriving keys when the IKM is larger than `hlen`.
+As such, I am proposing a new key derivation function specifically
+designed for deriving keys when the IKM is larger than `hlen`.
 
 This key derivation function has the following parameters:
 
-* `IKM` - Input keying material. Arbitrary length.
-* `Info` - Data identifying the key being derived. Arbitrary length.
-* `Salt` - Salt/Nonce. Arbitrary length.
-* `HMAC` - The HMAC algorithm.
+ *  `IKM` - Input keying material. Arbitrary length.
+ *  `Info` - Data identifying the key being derived. Arbitrary length.
+ *  `Salt` - Salt/Nonce. Arbitrary length.
+ *  `HMAC` - The HMAC algorithm.
 
 The output OKM is calculated as follows:
 
@@ -310,45 +298,27 @@ where:
 
     T(n) = Hash(Salt | T(n-1) | info | n  | IKM)
 
-Where n is represented with 4 octets, for a maximum generated key length of `hlen*(2^32-1)` bytes.
+Where n is represented with 4 octets, for a maximum generated key
+length of `hlen*(2^32-1)` bytes.
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
----------------------
+---
 
 ### RSA Key Generation ###
 
-To calculate an RSA key of nlen size, generate a random value
-with an empty salt that is twice the size as nlen.
+To calculate an RSA key of nlen size, generate a random value with an
+empty salt that is twice the size as nlen.
 
 `p` and `q` are derived from the most and least (respectively)
-significant halves of the random value, and refined using the following
-algorithm:
+significant halves of the random value, and refined using the
+following algorithm:
 
     p_len = floor(nlen/2)
-	q_len = (nlen-plen)
+    q_len = (nlen-plen)
 
-1. Set the two most significant bits and the least significant bit.
-2. If the number is not prime, goto 1.
-3. ???
-4. PR0FIT!!1
+1.  Set the two most significant bits and the least significant bit.
+2.  If the number is not prime, goto 1.
+3.  ???
+4.  PR0FIT!!1
 
 65537 is always assumed to be the public exponent.
 
@@ -356,59 +326,96 @@ Consider an option for using Lim and Lee algorithm.
 
 Alternatives:
 
-* FIPS 18.6 Appendix B.3.2.2
-* Versile Platform 0.8.1-DRAFT 14.2.2 Identity Generation
+ *  FIPS 18.6 Appendix B.3.2.2
+ *  Versile Platform 0.8.1-DRAFT 14.2.2 Identity Generation
 
+---
 
+Methods to deterministically calculate the following types of data
+from the master secret are/will-be defined:
 
+ *  StringOfBytes
+ *  IntegerLessThanX
+ *  Large Prime Number
+     *  PrimeNormal
+     *  PrimeSafe
+     *  PrimeStrong
+     *  PrimeLeeLim
+ *  RSAPrivateKey
+ *  DSAParameters
+ *  ECPrivateKey
 
---------------------------------------
+When requesting each class of random value, you specify a key
+identifier and salt. The key identifier and salt are compressed using
+HMAC-SHA256 into a 256-bit key selector:
 
-Methods to deterministically calculate the following
-types of data from the master secret are/will-be defined:
+    KeySelector = HMAC_SHA256(Salt, KeyIdentifierString)
 
-* StringOfBytes
-* IntegerLessThanX
-* Large Prime Number
-    * PrimeNormal
-    * PrimeSafe
-    * PrimeStrong
-    * PrimeLeeLim
-* RSAPrivateKey
-* DSAParameters
-* ECPrivateKey
+Ultimately, every class of random value ultimately uses the
+StringOfBytes class recursively to extract random values from the
+master secret. Each class generally permutes the key selector before
+processing it.
 
-When requesting each class of random value, you specify a key identifier and salt. The key identifier and salt are compressed using HMAC-SHA256 into a 256-bit key selector:
+StringOfBytes permutes as follows:
 
-	KeySelector = HMAC_SHA256(Salt, KeyIdentifierString)
+    NewKeySelector = HMAC_SHA256(GivenKeySelector, BigEndian32(KeyLength in octets))
 
-Ultimately, every class of random value ultimately uses the StringOfBytes class recursively to extract random values from the master secret. StringOfBytes uses the key selector directly, but other classes generally modify the key selector before passing it along to StringOfBytes.
+IntergerLessThanX will pass the given key selector along to
+StringOfBytes directly on the first attempt. If the attempt fails (the
+calculated value was too large), the key selector is permuted using
+`HMAC-SHA256(KeySelector, attemptcount)` and another attempt is made.
+This continues until a satisfactory number is calculated.
 
-IntergerLessThanX will pass the given key selector along to StringOfBytes directly on the first attempt. If the attempt fails (the calculated value was too large), the key selector is permuted using `HMAC-SHA256(KeySelector, attemptcount)` and another attempt is made. This continues until a satisfactory number is calculated.
+The prime classes, as well as the ECPrivateKey class, always permute
+the key selector with the name of the class before calling into
+subclasses:
 
-The prime classes, as well as the ECPrivateKey class, always permute the key selector with the name of the class before calling into subclasses:
+    NewKeySelector = HMAC_SHA256(GivenKeySelector, "NormalPrime"|BigEndian32(Prime length in octets))
 
-    NewKeySelector = HMAC_SHA256(GivenKeySelector, "NormalPrime:1024")
+The RSA class permutes the key selector to generate different keys for
+P and Q:
 
-The RSA class permutes the key selector to generate different keys for P and Q:
-
-    NewKeySelector_P = HMAC_SHA256(GivenKeySelector, "RSAPrivateKey:2048:p")
-    NewKeySelector_Q = HMAC_SHA256(GivenKeySelector, "RSAPrivateKey:2048:q")
+    NewKeySelector_P = HMAC_SHA256(GivenKeySelector, "RSAPrivateKey:p")
+    NewKeySelector_Q = HMAC_SHA256(GivenKeySelector, "RSAPrivateKey:q")
 
 Calculating DSAParameters uses a similar construct.
 
-The actual key identifier is an arbitrary string of bytes. While it could be anything, I recommend using a normalized case-folded UTF8 encoding. This string could be...
+The actual key identifier is an arbitrary string of bytes. While it
+could be anything, I recommend using a normalized UTF8 encoding. This
+string could be...
 
-* A URL.
-* A human-readable description.
-* A base64 hash.
-* A passphrase.
+ *  A URL.
+ *  A human-readable description.
+ *  A base64 hash.
+ *  A passphrase.
 
-Keeping a list of these key identifiers somewhere is generally a good idea. It is also a good idea to develop a system for naming. Here are some examples:
+Keeping a list of these key identifiers somewhere is generally a good
+idea. It is also a good idea to develop a system for naming. The
+general suggested format is `TYPE:[SUBTYPE:]DESCRIPTION[!EXTRA]`. Here
+are some examples:
 
-* `PGPKey:John Doe:1`
-* `X509:Acme CA Root`
-* `BIP0032:Seed:John Doe`
-* `SuperSecret:Delegate`
+ *  `OpenPGP:Cert:John Doe`
+ *  `OpenPGP:Auth:John Doe`
+ *  `X.509:Encrypt,Sign:John Doe`
+ *  `X.509:Cert:Acme CA Root`
+ *  `BIP0032:Seed:John Doe`
+ *  `DNSSEC:KSK:example.com!2014Q1`
+ *  `DNSSEC:ZSK:example.com!2014-02-15`
+ *  `SuperSecret:Delegate` (Abbreviated `Delegate/`)
 
-You can generate child SuperSecrets which can allow you to form a hierarchy of key generation capability.
+For OpenPGP/SMIME/X.509, the "SUBTYPE" indicates a comma-separated
+list of capabilities. The capabilities are:
+
+ *  `Cert` - Ability to certify/sign other keys (a Certification
+    Authority)
+ *  `Auth` - Ability to authenticate (via SSL for example).
+ *  `Sign` - Ability to sign for non-repudiation purposes.
+ *  `Encrypt` - Ability to encrypt/decrypt data.
+
+You can generate child SuperSecrets which can allow you to form a
+hierarchy of key generation capability.
+
+Nested Keys can be identified using a slash:
+
+    Master -> SuperSecret:Delegate -> DNSSEC:ZSK:example.com!2014Q1
+    M/Delegate/DNSSEC:ZSK:example.com
