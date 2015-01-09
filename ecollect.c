@@ -155,7 +155,7 @@ main(int argc, char * argv[])
 		bytes_consumed += len;
 	}
 
-	fprintf(stderr, "done. Consumed %llu bytes\n", bytes_consumed);
+	fprintf(stderr, "done. Consumed %lld bytes\n", (long long)bytes_consumed);
 //	hex_dump(stderr, epool, epool_size, "");
 	fprintf(stderr, "\n");
 	return EXIT_SUCCESS;

@@ -7,21 +7,20 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include "hmac_sha/hmac_sha256.h"
 
-void LKDF_SHA256_extract(
+typedef uint8_t LKDF_SHA256_KeySelector[HMAC_SHA256_DIGEST_LENGTH];
+
+void LKDF_SHA256_CalcKeySelector(
+	LKDF_SHA256_KeySelector key_out,
+	const uint8_t *salt, size_t salt_size,
+	const uint8_t *info, size_t info_size
+);
+
+void LKDF_SHA256_Extract(
 	uint8_t *key_out, size_t key_size,
-	const uint8_t *salt, size_t salt_size,
-	const uint8_t *info, size_t info_size,
+	const LKDF_SHA256_KeySelector keySelector,
 	const uint8_t *ikm, size_t ikm_size
 );
-
-/*
-int LKDF_SHA256_ExtractToFILE(
-	FILE* key_file, size_t key_size,
-	const uint8_t *salt, size_t salt_size,
-	const uint8_t *info, size_t info_size,
-	const uint8_t *ikm, size_t ikm_size
-);
-*/
 
 #endif

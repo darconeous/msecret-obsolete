@@ -1,4 +1,5 @@
 
+#include <assert.h>
 #include "msecret.h"
 #include "lkdf.h"
 #include "hmac_sha/hmac_sha256.h"
@@ -14,47 +15,40 @@ enclosing_mask_uint8(uint8_t x) {
 	return x;
 }
 
-static void
-_MSECRET_Extract(
-	uint8_t *key_out, size_t key_size,
-	uint32_t salt,
-	const char *info,
-	const uint8_t *ikm, size_t ikm_size
+
+
+void
+MSECRET_CalcKeySelector(
+	MSECRET_KeySelector keySelector_out,
+	const uint8_t *salt, size_t salt_size,
+	const char *info, size_t info_size
 ) {
-	salt = htonl(salt);
-	if (info == NULL) {
-		info = "";
+	if ((info != NULL) && (info_size == 0)) {
+		info_size = strlen(info);
 	}
-	LKDF_SHA256_extract(
-		key_out, key_size,
-		(uint8_t*)&salt, sizeof(salt),
-		(const uint8_t*)info, strlen(info),
-		ikm, ikm_size
-	);
+	return LKDF_SHA256_CalcKeySelector(keySelector_out,salt,salt_size,(const uint8_t*)info, info_size);
 }
 
-void
-MSECRET_Extract(
+void MSECRET_Extract_Bytes(
 	uint8_t *key_out, size_t key_size,
-	const char *info,
+	const MSECRET_KeySelector key_selector,
 	const uint8_t *ikm, size_t ikm_size
 ) {
-	_MSECRET_Extract(
+	LKDF_SHA256_Extract(
 		key_out, key_size,
-		0,
-		info,
+		key_selector,
 		ikm, ikm_size
 	);
 }
 
-void
-MSECRET_ExtractMod(
+void MSECRET_Extract_Integer(
 	uint8_t *key_out,
-	uint8_t *max_in, size_t mod_size,
-	const char *info,
+	const uint8_t *max_in, size_t mod_size,
+	const MSECRET_KeySelector key_selector,
 	const uint8_t *ikm, size_t ikm_size
 ) {
-	uint32_t salt = 0;
+	uint32_t salt = 0, be_salt = 0;
+	MSECRET_KeySelector new_key_selector;
 
 	// Cancel out the initial increment in the loop.
 	salt--;
@@ -69,17 +63,29 @@ MSECRET_ExtractMod(
 	// Search for a key which satisfies the modulous
 	do {
 		salt++;
+		be_salt = htonl(salt);
 
-		_MSECRET_Extract(
+		if (salt == 0) {
+			// For the first try we just pass it thru
+			memcpy(new_key_selector, key_selector, sizeof(new_key_selector));
+		} else {
+			MSECRET_CalcKeySelector(
+				new_key_selector,
+				(uint8_t*)&be_salt, sizeof(be_salt),
+				(const char*)key_selector, sizeof(MSECRET_KeySelector)
+			);
+		}
+		MSECRET_Extract_Bytes(
 			key_out, mod_size,
-			salt,
-			info,
+			new_key_selector,
 			ikm, ikm_size
 		);
 
 		// Mask the unnecessary bits of the first
 		// byte. This makes the search faster.
 		key_out[0] &= enclosing_mask_uint8(max_in[0]);
+
+		assert(salt < 2048);
 	} while( memcmp(key_out, max_in, mod_size) > 0 );
 }
 
@@ -117,10 +123,17 @@ main(void) {
 
 		uint8_t key_out[16] = { 0 };
 		uint8_t max_in[16] = { 0, 0x08, 0xFF };
+		MSECRET_KeySelector key_selector;
 
-		MSECRET_ExtractMod(
+		MSECRET_CalcKeySelector(
+			key_selector,
+			NULL, 0,
+			info, 0
+		);
+
+		MSECRET_Extract_Integer(
 			key_out, max_in, sizeof(max_in),
-			info,
+			key_selector,
 			master_secret, sizeof(master_secret)
 		);
 

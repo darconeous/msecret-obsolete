@@ -14,26 +14,14 @@ xorcpy(void *restrict dst, const void *restrict src, size_t n)
 	return dst;
 }
 
-void
-LKDF_SHA256_extract(
-	uint8_t *key_out, size_t key_size,
+
+void LKDF_SHA256_CalcKeySelector(
+	LKDF_SHA256_KeySelector key_out,
 	const uint8_t *salt, size_t salt_size,
-	const uint8_t *info, size_t info_size,
-	const uint8_t *ikm, size_t ikm_size
+	const uint8_t *info, size_t info_size
 ) {
-	uint8_t buf[HMAC_SHA256_DIGEST_LENGTH];
-	uint32_t n;
+	int n;
 	HMAC_SHA256_CTX hmac;
-
-#ifdef LKDF_DEBUG
-	fprintf(stderr, "key_size: %d\n", (int)key_size);
-	fprintf(stderr, "salt_size: %d\n", (int)salt_size);
-	fprintf(stderr, "info_size: %d\n", (int)info_size);
-	fprintf(stderr, "ikm_size: %d\n", (int)ikm_size);
-#endif
-
-	// --------------------------------------------------------
-	// Calculate selector --- `HMAC(salt, info)`
 
 	HMAC_SHA256_Init(&hmac);
 
@@ -44,18 +32,34 @@ LKDF_SHA256_extract(
 	}
 
 	HMAC_SHA256_UpdateKey(&hmac, salt, salt_size);
+
 	HMAC_SHA256_EndKey(&hmac);
 	HMAC_SHA256_StartMessage(&hmac);
 	HMAC_SHA256_UpdateMessage(&hmac, info, info_size);
 
-	// Selector is now in `buf`.
-	HMAC_SHA256_EndMessage(buf, &hmac);
+	// Selector is now in `key_out`.
+	HMAC_SHA256_EndMessage(key_out, &hmac);
+}
+
+void LKDF_SHA256_Extract(
+	uint8_t *key_out, size_t key_size,
+	const LKDF_SHA256_KeySelector keySelector,
+	const uint8_t *ikm, size_t ikm_size
+) {
+	uint8_t buf[HMAC_SHA256_DIGEST_LENGTH];
+	uint32_t n;
+	HMAC_SHA256_CTX hmac;
+
+#ifdef LKDF_DEBUG
+	fprintf(stderr, "key_size: %d\n", (int)key_size);
+	fprintf(stderr, "ikm_size: %d\n", (int)ikm_size);
+#endif
 
 	// --------------------------------------------------------
 	// Load the selector as the new key
 
 	HMAC_SHA256_Init(&hmac);
-	HMAC_SHA256_UpdateKey(&hmac, buf, HMAC_SHA256_DIGEST_LENGTH);
+	HMAC_SHA256_UpdateKey(&hmac, keySelector, HMAC_SHA256_DIGEST_LENGTH);
 	HMAC_SHA256_EndKey(&hmac);
 
 	// --------------------------------------------------------
@@ -170,13 +174,18 @@ main(void) {
 	{
 		static const uint8_t master_secret[0]; // Empty master secret
 		static const char info[] = "LKDF Test Vector";
-
 		uint8_t key_out[16] = { 0 };
+		LKDF_SHA256_KeySelector keySelector;
 
-		LKDF_SHA256_extract(
-			key_out, sizeof(key_out),
+		LKDF_SHA256_CalcKeySelector(
+			keySelector,
 			NULL, 0,
-			(const uint8_t*)info, strlen(info),
+			(const uint8_t*)info, strlen(info)
+		);
+
+		LKDF_SHA256_Extract(
+			key_out, sizeof(key_out),
+			keySelector,
 			master_secret, sizeof(master_secret)
 		);
 
@@ -191,10 +200,17 @@ main(void) {
 
 		uint8_t key_out[16] = { 0 };
 
-		LKDF_SHA256_extract(
-			key_out, sizeof(key_out),
+		LKDF_SHA256_KeySelector keySelector;
+
+		LKDF_SHA256_CalcKeySelector(
+			keySelector,
 			NULL, 0,
-			(const uint8_t*)info, strlen(info),
+			(const uint8_t*)info, strlen(info)
+		);
+
+		LKDF_SHA256_Extract(
+			key_out, sizeof(key_out),
+			keySelector,
 			master_secret, sizeof(master_secret)
 		);
 
@@ -208,14 +224,19 @@ main(void) {
 		static const char info[] = "LKDF Test Vector";
 
 		uint8_t key_out[48] = { 0 };
+		LKDF_SHA256_KeySelector keySelector;
 
-		LKDF_SHA256_extract(
-			key_out, sizeof(key_out),
+		LKDF_SHA256_CalcKeySelector(
+			keySelector,
 			NULL, 0,
-			(const uint8_t*)info, strlen(info),
-			master_secret, sizeof(master_secret)
+			(const uint8_t*)info, strlen(info)
 		);
 
+		LKDF_SHA256_Extract(
+			key_out, sizeof(key_out),
+			keySelector,
+			master_secret, sizeof(master_secret)
+		);
 		fprintf(stdout, "Master secret with 512 zeros, empty salt\n");
 		fprintf(stdout, "\tkey_out = ");
 		hex_dump(stdout, key_out, sizeof(key_out));
@@ -226,11 +247,17 @@ main(void) {
 		static const char info[] = "LKDF Test Vector";
 
 		uint8_t key_out[48] = { 0 };
+		LKDF_SHA256_KeySelector keySelector;
 
-		LKDF_SHA256_extract(
-			key_out, sizeof(key_out),
+		LKDF_SHA256_CalcKeySelector(
+			keySelector,
 			NULL, 0,
-			(const uint8_t*)info, strlen(info),
+			(const uint8_t*)info, strlen(info)
+		);
+
+		LKDF_SHA256_Extract(
+			key_out, sizeof(key_out),
+			keySelector,
 			master_secret, sizeof(master_secret)
 		);
 

@@ -74,6 +74,7 @@ main(int argc, char * argv[])
 	const char* output_key_filename = NULL;
 	FILE* output_key_file = NULL;
 	unsigned int zero_fill_digits = 0;
+	MSECRET_KeySelector key_selector;
 
 	enum {
 		OUTPUT_UNSPECIFIED,
@@ -331,20 +332,26 @@ main(int argc, char * argv[])
 		goto bail;
 	}
 
+	MSECRET_CalcKeySelector(
+		key_selector,
+		NULL, 0,
+		key_identifier, 0
+	);
+
 	if (key_max == NULL) {
 		// Extracts a random key with a length of
 		// key_byte_length.
-		MSECRET_Extract(
+		MSECRET_Extract_Bytes(
 			output_key, key_byte_length,
-			key_identifier,
+			key_selector,
 			master_secret, master_secret_len
 		);
 	} else {
 		// Extracts a key that is less than or
 		// equal to the specific value of key_max.
-		MSECRET_ExtractMod(
+		MSECRET_Extract_Integer(
 			output_key, key_max, key_byte_length,
-			key_identifier,
+			key_selector,
 			master_secret, master_secret_len
 		);
 	}
