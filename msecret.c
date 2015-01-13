@@ -1,11 +1,13 @@
 
 #include <assert.h>
+#include <stdbool.h>
 #include "msecret.h"
 #include "lkdf.h"
 #include "hmac_sha/hmac_sha256.h"
 #include <arpa/inet.h>
 #include <string.h>
 #include <stdio.h>
+
 
 static uint8_t
 enclosing_mask_uint8(uint8_t x) {
@@ -14,8 +16,6 @@ enclosing_mask_uint8(uint8_t x) {
 	x |= (x >> 4);
 	return x;
 }
-
-
 
 void
 MSECRET_CalcKeySelector(
@@ -41,7 +41,221 @@ void MSECRET_Extract_Bytes(
 	);
 }
 
-void MSECRET_Extract_Integer(
+void
+MSECRET_Extract_Integer_BN(
+	BIGNUM *val,
+	const BIGNUM *max,
+	const MSECRET_KeySelector key_selector,
+	const uint8_t *ikm, size_t ikm_size
+) {
+	int size = BN_num_bytes(max);
+	uint8_t val_bytes[size];
+	uint8_t max_bytes[size];
+	BN_bn2bin(max, max_bytes);
+	MSECRET_Extract_Integer(
+		val_bytes,
+		max_bytes,
+		size,
+		key_selector,
+		ikm,ikm_size
+	);
+	BN_bin2bn(val_bytes, size, val);
+}
+
+void
+MSECRET_Extract_Prime_BN(
+	BIGNUM *prime,
+	int bit_length,
+	int flags,
+	const MSECRET_KeySelector key_selector,
+	const uint8_t *ikm, size_t ikm_size
+) {
+	MSECRET_KeySelector new_key_selector;
+	HMAC_SHA256_CTX hmac;
+	BIGNUM *max = BN_new();
+	BIGNUM *e = NULL;
+	uint32_t bit_length_be = htonl(bit_length);
+	BN_CTX *ctx = BN_CTX_new();
+	BIGNUM *r0 = BN_new();
+	BIGNUM *r1 = BN_new();
+
+	HMAC_SHA256_Init(&hmac);
+	HMAC_SHA256_UpdateKey(&hmac, key_selector, sizeof(MSECRET_KeySelector));
+	HMAC_SHA256_EndKey(&hmac);
+	HMAC_SHA256_StartMessage(&hmac);
+	HMAC_SHA256_UpdateMessage(&hmac, (const uint8_t*)"Prime:", 6);
+	if (flags & MSECRET_PRIME_STD_EXPONENT) {
+		e = BN_new();
+		BN_set_word(e, RSA_F4);
+		HMAC_SHA256_UpdateMessage(&hmac, (const uint8_t*)"GCD65537=0:", 7);
+	}
+	HMAC_SHA256_UpdateMessage(&hmac, (uint8_t*)&bit_length_be, sizeof(bit_length_be));
+	HMAC_SHA256_EndMessage(new_key_selector, &hmac);
+
+	BN_set_bit(max, bit_length);
+	BN_sub_word(max, 1);
+
+	MSECRET_Extract_Integer_BN(
+		prime,
+		max,
+		new_key_selector,
+		ikm, ikm_size
+	);
+
+	BN_set_bit(prime, 0);
+	BN_set_bit(prime, bit_length-1);
+	BN_set_bit(prime, bit_length-2);
+
+	for(;true;BN_add_word(prime, 2)) {
+		if (!BN_is_prime(prime, BN_prime_checks, NULL, ctx, NULL)) {
+			continue;
+		}
+
+		if (flags & MSECRET_PRIME_LEELIM) {
+			// TODO: Check that the prime is a "Lee/Lim" prime.
+		}
+
+		if (e != NULL) {
+			BN_sub(r0,prime,BN_value_one());
+			BN_gcd(r1,r0,e,ctx);
+			if (!BN_is_one(r1)) {
+				fprintf(stderr,"Note: Skipped prime where (p-1) was divisible by 65537\n");
+				continue;
+			}
+		}
+
+		break;
+	}
+
+	if (e) {
+		BN_free(e);
+	}
+	BN_free(r0);
+	BN_free(r1);
+	BN_free(max);
+	BN_CTX_free(ctx);
+}
+
+void
+MSECRET_Extract_RSA(
+	RSA *rsa,
+	int mod_length,
+	int flags,
+	const MSECRET_KeySelector key_selector,
+	const uint8_t *ikm, size_t ikm_size
+) {
+	// TODO: Review http://www.opensource.apple.com/source/OpenSSL097/OpenSSL097-16/openssl/crypto/rsa/rsa_gen.c
+	uint32_t salt = 0, be_salt = 0;
+	MSECRET_KeySelector new_key_selector;
+	int bitsp, bitsq;
+	HMAC_SHA256_CTX hmac;
+	BN_CTX *ctx = BN_CTX_new();
+	BIGNUM *r0 = BN_new();
+	BIGNUM *r1 = BN_new();
+	BIGNUM *r2 = BN_new();
+	BIGNUM *r3 = BN_new();
+
+	bitsp = (mod_length+1)/2;
+	bitsq = mod_length-bitsp;
+
+	if (rsa->p == NULL) {
+		rsa->p = BN_new();
+	}
+
+	if (rsa->q == NULL) {
+		rsa->q = BN_new();
+	}
+
+	if (rsa->n == NULL) {
+		rsa->n = BN_new();
+	}
+
+	if (rsa->e == NULL) {
+		rsa->e = BN_new();
+	}
+
+	if (rsa->d == NULL) {
+		rsa->d = BN_new();
+	}
+
+	BN_set_word(rsa->e, 65537);
+
+	MSECRET_CalcKeySelector(
+		new_key_selector,
+		key_selector, sizeof(MSECRET_KeySelector),
+		"RSAPrivateKey:p", 0
+	);
+
+	MSECRET_Extract_Prime_BN(
+		rsa->p,
+		bitsp,
+		flags | MSECRET_PRIME_STD_EXPONENT,
+		new_key_selector,
+		ikm, ikm_size
+	);
+
+	MSECRET_CalcKeySelector(
+		new_key_selector,
+		key_selector, sizeof(MSECRET_KeySelector),
+		"RSAPrivateKey:q", 0
+	);
+
+	MSECRET_Extract_Prime_BN(
+		rsa->q,
+		bitsq,
+		flags | MSECRET_PRIME_STD_EXPONENT,
+		new_key_selector,
+		ikm, ikm_size
+	);
+
+	assert(BN_cmp(rsa->p,rsa->q) != 0);
+
+	// P should be the larger of the two, by convention.
+	if (BN_cmp(rsa->p,rsa->q) < 0)
+	{
+		BIGNUM *tmp=rsa->p;
+		rsa->p=rsa->q;
+		rsa->q=tmp;
+	}
+
+	// Calculate N
+	BN_mul(rsa->n, rsa->p, rsa->q, ctx);
+
+	// Calculate D
+	BN_sub(r0, rsa->n, rsa->p);
+	BN_sub(r1, r0, rsa->q);
+	BN_add(r0, r1, BN_value_one());
+	BN_mod_inverse(rsa->d, rsa->e, r0, ctx);
+
+	// Calculate DMP1
+	if (rsa->dmp1 == NULL) {
+		rsa->dmp1 = BN_new();
+	}
+	BN_sub(r1, rsa->p, BN_value_one());
+	BN_mod(rsa->dmp1,rsa->d,r1,ctx);
+
+	// Calculate DMQ1
+	if (rsa->dmq1 == NULL) {
+		rsa->dmq1 = BN_new();
+	}
+	BN_sub(r2, rsa->q, BN_value_one());
+	BN_mod(rsa->dmq1,rsa->d,r2,ctx);
+
+	// Calculate IQMP
+	if (rsa->iqmp == NULL) {
+		rsa->iqmp = BN_new();
+	}
+	BN_mod_inverse(rsa->iqmp,rsa->q,rsa->p,ctx);
+
+	BN_free(r0);
+	BN_free(r1);
+	BN_free(r2);
+	BN_free(r3);
+	BN_CTX_free(ctx);
+}
+
+void
+MSECRET_Extract_Integer(
 	uint8_t *key_out,
 	const uint8_t *max_in, size_t mod_size,
 	const MSECRET_KeySelector key_selector,
@@ -70,7 +284,7 @@ void MSECRET_Extract_Integer(
 		HMAC_SHA256_UpdateKey(&hmac, key_selector, sizeof(MSECRET_KeySelector));
 		HMAC_SHA256_EndKey(&hmac);
 		HMAC_SHA256_StartMessage(&hmac);
-		HMAC_SHA256_UpdateMessage(&hmac, "Integer", 7);
+		HMAC_SHA256_UpdateMessage(&hmac, (const uint8_t*)"Integer:", 7);
 		HMAC_SHA256_UpdateMessage(&hmac, max_in, mod_size);
 		HMAC_SHA256_UpdateMessage(&hmac, (uint8_t*)&be_salt, sizeof(be_salt));
 		HMAC_SHA256_EndMessage(new_key_selector, &hmac);

@@ -7,6 +7,11 @@
 #include "help.h"
 #include <sys/errno.h>
 #include <inttypes.h>
+#define HEADER_SHA_H 1
+#define SHA_DIGEST_LENGTH (160/8)
+#include <openssl/x509.h>
+#include <openssl/pem.h>
+
 
 int
 hex_dump(FILE* file, const uint8_t *data, size_t data_len, const char* sep)
@@ -54,6 +59,9 @@ static arg_list_item_t option_list[] = {
 	{   0, "format-hex",	NULL, "Output hexidecimal key"				},
 	{   0, "format-dec",	NULL, "Output decimal key"				},
 	{ 0, "dec-zero-fill", "X", "Zero fill key to X places"},
+	{ 0, "prime",	NULL, "Derive a large prime"				},
+	{ 0, "rsa",	NULL, "Derive a RSA private key"				},
+	{ 0, "rsa-public",	NULL, "Derive an RSA public key"				},
 	{ 0 }
 };
 
@@ -75,6 +83,17 @@ main(int argc, char * argv[])
 	FILE* output_key_file = NULL;
 	unsigned int zero_fill_digits = 0;
 	MSECRET_KeySelector key_selector;
+	enum {
+		TYPE_BYTES,
+		TYPE_INTEGER,
+		TYPE_PRIME,
+		TYPE_RSA,
+		TYPE_RSA_PUBLIC,
+		TYPE_EC,
+		TYPE_EC_PUBLIC,
+		TYPE_DSA_PARAM,
+	} secret_type;
+	bool gen_prime=false;
 
 	enum {
 		OUTPUT_UNSPECIFIED,
@@ -84,6 +103,9 @@ main(int argc, char * argv[])
 		OUTPUT_B64,
 		OUTPUT_B32,
 	} output_format = OUTPUT_UNSPECIFIED;
+	RSA *rsa = NULL;
+
+	secret_type = TYPE_BYTES;
 
 	BEGIN_LONG_ARGUMENTS(ret)
 	HANDLE_LONG_ARGUMENT("input")
@@ -118,6 +140,26 @@ main(int argc, char * argv[])
 	{
 		output_format = OUTPUT_RAW;
 	}
+	HANDLE_LONG_ARGUMENT("prime")
+	{
+		secret_type = TYPE_PRIME;
+	}
+	HANDLE_LONG_ARGUMENT("rsa")
+	{
+		secret_type = TYPE_RSA;
+		if (output_format == OUTPUT_UNSPECIFIED) {
+			output_format = OUTPUT_RAW;
+			output_format = OUTPUT_B64;
+		}
+	}
+	HANDLE_LONG_ARGUMENT("rsa-public")
+	{
+		secret_type = TYPE_RSA_PUBLIC;
+		if (output_format == OUTPUT_UNSPECIFIED) {
+			output_format = OUTPUT_RAW;
+			output_format = OUTPUT_B64;
+		}
+	}
 	HANDLE_LONG_ARGUMENT("key-identifier")
 	{
 		key_identifier = argv[++i];
@@ -128,6 +170,7 @@ main(int argc, char * argv[])
 	}
 	HANDLE_LONG_ARGUMENT("key-max")
 	{
+		secret_type = TYPE_INTEGER;
 		if (key_max != NULL) {
 			fprintf(stderr, "key-max already specified\n");
 			ret = EXIT_FAILURE;
@@ -324,7 +367,7 @@ main(int argc, char * argv[])
 		output_key_file = stdout;
 	}
 
-	output_key = calloc(key_byte_length, 1);
+	output_key = calloc(key_byte_length+10, 1);
 
 	if (output_key == NULL) {
 		fprintf(stderr, "Ran out of memory for output key\n");
@@ -339,13 +382,37 @@ main(int argc, char * argv[])
 	);
 
 	if (key_max == NULL) {
-		// Extracts a random key with a length of
-		// key_byte_length.
-		MSECRET_Extract_Bytes(
-			output_key, key_byte_length,
-			key_selector,
-			master_secret, master_secret_len
-		);
+		if (secret_type == TYPE_PRIME) {
+			BIGNUM *prime = BN_new();
+			MSECRET_Extract_Prime_BN(
+				prime,
+			    key_byte_length*8,
+				0,
+				key_selector,
+				master_secret, master_secret_len
+			);
+			BN_bn2bin(prime, output_key);
+			key_byte_length = BN_num_bytes(prime);
+			BN_free(prime);
+		} else if ((secret_type == TYPE_RSA) || (secret_type == TYPE_RSA_PUBLIC)) {
+			rsa = RSA_new();
+			MSECRET_Extract_RSA(
+				rsa,
+			    key_byte_length*8,
+				0,
+				key_selector,
+				master_secret, master_secret_len
+			);
+
+		} else {
+			// Extracts a random key with a length of
+			// key_byte_length.
+			MSECRET_Extract_Bytes(
+				output_key, key_byte_length,
+				key_selector,
+				master_secret, master_secret_len
+			);
+		}
 	} else {
 		// Extracts a key that is less than or
 		// equal to the specific value of key_max.
@@ -356,57 +423,113 @@ main(int argc, char * argv[])
 		);
 	}
 
-	switch (output_format) {
-	case OUTPUT_DEC:
-		{
-			if (key_byte_length <= 4) {
-				uint32_t v = 0;
-				char* format_string = NULL;
-				memcpy(((uint8_t*)&v)+4-key_byte_length, output_key, key_byte_length);
-				v = htonl(v);
-				asprintf(&format_string,"%%0%du\n", zero_fill_digits);
-				if (format_string == NULL) {
-					fprintf(stderr, "aprintf failed\n");
-					ret = EXIT_FAILURE;
-					goto bail;
-				}
-				fprintf(stdout, format_string, v);
-				free(format_string);
+	if (secret_type == TYPE_RSA) {
+		if(debug_mode)RSA_print_fp(stderr, rsa, 0);
+		switch (output_format) {
+		case OUTPUT_UNSPECIFIED:
+		case OUTPUT_RAW:
+			i2d_RSAPrivateKey_fp(stdout,rsa);
+			break;
+		case OUTPUT_B64:
+			{
+				EVP_PKEY* private_key = EVP_PKEY_new();
+				EVP_PKEY_set1_RSA(private_key, rsa);
+				PEM_write_PrivateKey(
+					stdout,
+					private_key,
+					NULL,
+					NULL, 0, NULL, NULL
+				);
+				EVP_PKEY_free(private_key);
+			}
+			break;
+		default:
+			fprintf(stderr, "Invalid output format\n");
+			ret = EXIT_FAILURE;
+			goto bail;
+			break;
+		}
+	} else if (secret_type == TYPE_RSA_PUBLIC) {
+		if(debug_mode)RSA_print_fp(stderr, rsa, 0);
+		switch (output_format) {
+		case OUTPUT_UNSPECIFIED:
+		case OUTPUT_RAW:
+			i2d_RSAPublicKey_fp(stdout,rsa);
+			break;
+		case OUTPUT_B64:
+			{
+				EVP_PKEY* private_key = EVP_PKEY_new();
+				EVP_PKEY_set1_RSA(private_key, rsa);
+				PEM_write_RSAPublicKey(
+					stdout,
+					rsa
+				);
+				EVP_PKEY_free(private_key);
+			}
+			break;
+		default:
+			fprintf(stderr, "Invalid output format\n");
+			ret = EXIT_FAILURE;
+			goto bail;
+			break;
+		}
+	} else {
+		switch (output_format) {
+			if (secret_type == TYPE_RSA) {
+			}
+			break;
+		case OUTPUT_DEC:
+			{
+				if (key_byte_length <= 4) {
+					uint32_t v = 0;
+					char* format_string = NULL;
+					memcpy(((uint8_t*)&v)+4-key_byte_length, output_key, key_byte_length);
+					v = htonl(v);
+					asprintf(&format_string,"%%0%du\n", zero_fill_digits);
+					if (format_string == NULL) {
+						fprintf(stderr, "aprintf failed\n");
+						ret = EXIT_FAILURE;
+						goto bail;
+					}
+					fprintf(stdout, format_string, v);
+					free(format_string);
 
-/*
-			} else if (key_byte_length <= 8) {
-				uint64_t v = 0;
-				memcpy(((uint8_t*)&v)+8-key_byte_length, output_key, key_byte_length);
-				v = htonll(v);
-				fprintf(stdout, "%llu\n", v);
-*/
-			} else {
-				fprintf(stderr, "Key size too large for decimal mode\n");
-				ret = EXIT_FAILURE;
+	/*
+				} else if (key_byte_length <= 8) {
+					uint64_t v = 0;
+					memcpy(((uint8_t*)&v)+8-key_byte_length, output_key, key_byte_length);
+					v = htonll(v);
+					fprintf(stdout, "%llu\n", v);
+	*/
+				} else {
+					fprintf(stderr, "Key size too large for decimal mode\n");
+					ret = EXIT_FAILURE;
+				}
 			}
-		}
-		break;
-	case OUTPUT_HEX:
-		hex_dump(stdout, output_key, key_byte_length, "");
-		fprintf(stdout, "\n");
-		break;
-	case OUTPUT_RAW:
-		{
-			int written;
-			written = fwrite(output_key,key_byte_length,1,output_key_file);
-			if (written < 0) {
-				fprintf(stderr, "Write failure: %d %s\n", errno, strerror(errno));
-				ret = EXIT_FAILURE;
-			} else {
-				fprintf(stderr, "%d bytes written\n", written);
+			break;
+		case OUTPUT_HEX:
+			hex_dump(stdout, output_key, key_byte_length, "");
+			fprintf(stdout, "\n");
+			break;
+		case OUTPUT_RAW:
+			{
+				int written;
+				written = fwrite(output_key,key_byte_length,1,output_key_file);
+				if (written < 0) {
+					fprintf(stderr, "Write failure: %d %s\n", errno, strerror(errno));
+					ret = EXIT_FAILURE;
+				} else {
+					fprintf(stderr, "%d bytes written\n", written);
+				}
 			}
+			break;
+		case OUTPUT_UNSPECIFIED:
+		default:
+			fprintf(stderr, "Unknown output format\n");
+			ret = EXIT_FAILURE;
+			goto bail;
+			break;
 		}
-		break;
-	default:
-		fprintf(stderr, "Unknown output format\n");
-		ret = EXIT_FAILURE;
-		goto bail;
-		break;
 	}
 
 bail:

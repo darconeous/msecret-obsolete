@@ -1,6 +1,8 @@
 
 
-CFLAGS=-g -O0
+CFLAGS=-g -O0  -Wno-deprecated-declarations
+
+LDFLAGS=-lcrypto
 
 all: msecret ecollect
 
