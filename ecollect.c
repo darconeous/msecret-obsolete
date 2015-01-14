@@ -24,6 +24,7 @@ add_entropy(uint8_t* pool, int pool_len, const uint8_t* entropy, int entropy_len
 	int i;
 	SHA256_CTX hash;
 	uint8_t hashval[SHA256_DIGEST_LENGTH];
+
 	while (entropy_len > pool_len) {
 		add_entropy(pool, pool_len, entropy, pool_len);
 		entropy += pool_len;
@@ -31,7 +32,7 @@ add_entropy(uint8_t* pool, int pool_len, const uint8_t* entropy, int entropy_len
 	}
 
 	// Step 1: XOR in the entropy.
-	for (i = 0; i <= (pool_len-1)/entropy_len; i++) {
+	for (i = 0; (entropy_len > 0) && (i <= (pool_len-1)/entropy_len); i++) {
 		int offset = i*entropy_len;
 		int len = entropy_len;
 		if (offset+len > pool_len) {
@@ -41,6 +42,11 @@ add_entropy(uint8_t* pool, int pool_len, const uint8_t* entropy, int entropy_len
 			break;
 		}
 		xorcpy(pool+offset, entropy, len);
+	}
+
+	if (entropy_len <= 0) {
+		// Nothing to do.
+		return;
 	}
 
 	// Step 2: Mix it up.
@@ -142,9 +148,9 @@ main(int argc, char * argv[])
 		fprintf(stderr,"opened %s\n",argv[2]);
 	}
 	while(!feof(stdin) && !ferror(stdin) && !gInterrupted) {
-		uint8_t buffer[512] = {};
+		uint8_t buffer[1024] = {};
 		int len;
-		len = fread(buffer, 1, sizeof(buffer), stdin);
+		len = fread(buffer, 1, epool_size>1024?1024:epool_size, stdin);
 
 		if (len<0) {
 			perror("fread");
