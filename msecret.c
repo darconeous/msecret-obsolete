@@ -136,6 +136,96 @@ MSECRET_Extract_Prime_BN(
 	BN_CTX_free(ctx);
 }
 
+
+void
+MSECRET_Extract_RSA_X931(
+	RSA *rsa,
+	int mod_length,
+	const MSECRET_KeySelector key_selector,
+	const uint8_t *ikm, size_t ikm_size
+) {
+	MSECRET_KeySelector new_key_selector;
+	int bitsp, bitsq;
+	int i;
+	BN_CTX *ctx = BN_CTX_new();
+	BIGNUM *xp[3] = { BN_CTX_get(ctx), BN_CTX_get(ctx), BN_CTX_get(ctx) };
+	BIGNUM *xq[3] = { BN_CTX_get(ctx), BN_CTX_get(ctx), BN_CTX_get(ctx) };
+	BIGNUM *max = BN_CTX_get(ctx);
+	BIGNUM *max101 = BN_CTX_get(ctx);
+
+	bitsp = (mod_length+1)/2;
+	bitsq = mod_length-bitsp;
+
+	if (rsa->e == NULL) {
+		rsa->e = BN_new();
+		BN_set_word(rsa->e, RSA_F4);
+	}
+
+	BN_set_bit(max101, 102);
+	BN_sub_word(max101, 1);
+
+	BN_set_bit(max, bitsp);
+	BN_sub_word(max, 1);
+
+	for(i=0; i<3; i++) {
+		char sel_str[] = "Xp0";
+		sel_str[2] += i;
+		MSECRET_CalcKeySelector(
+			new_key_selector,
+			key_selector, sizeof(MSECRET_KeySelector),
+			sel_str, 0
+		);
+
+		MSECRET_Extract_Integer_BN(
+			xp[i],
+			(i==0)?max:max101,
+			new_key_selector,
+			ikm, ikm_size
+		);
+	}
+	BN_set_bit(xp[0], 0);
+	BN_set_bit(xp[0], bitsp-1);
+	BN_set_bit(xp[0], bitsp-2);
+
+	BN_zero(max);
+	BN_set_bit(max, bitsq);
+	BN_sub_word(max, 1);
+
+	for(i=0; i<3; i++) {
+		char sel_str[] = "Xq0";
+		sel_str[2] += i;
+		MSECRET_CalcKeySelector(
+			new_key_selector,
+			key_selector, sizeof(MSECRET_KeySelector),
+			sel_str, 0
+		);
+
+		MSECRET_Extract_Integer_BN(
+			xq[i],
+			(i==0)?max:max101,
+			new_key_selector,
+			ikm, ikm_size
+		);
+	}
+	BN_set_bit(xq[0], 0);
+	BN_set_bit(xq[0], bitsq-1);
+	BN_set_bit(xq[0], bitsq-2);
+
+	RSA_X931_derive_ex(
+		rsa,
+		NULL, NULL,
+		NULL, NULL,
+		xp[1], xp[2], xp[0],
+		xq[1], xq[2], xq[0],
+		rsa->e,
+		NULL
+	);
+
+	BN_CTX_free(ctx);
+}
+
+
+
 void
 MSECRET_Extract_RSA(
 	RSA *rsa,
@@ -166,19 +256,10 @@ MSECRET_Extract_RSA(
 		rsa->q = BN_new();
 	}
 
-	if (rsa->n == NULL) {
-		rsa->n = BN_new();
-	}
-
 	if (rsa->e == NULL) {
 		rsa->e = BN_new();
+		BN_set_word(rsa->e, RSA_F4);
 	}
-
-	if (rsa->d == NULL) {
-		rsa->d = BN_new();
-	}
-
-	BN_set_word(rsa->e, 65537);
 
 	MSECRET_CalcKeySelector(
 		new_key_selector,
@@ -218,39 +299,17 @@ MSECRET_Extract_RSA(
 		rsa->q=tmp;
 	}
 
-	// Calculate N
-	BN_mul(rsa->n, rsa->p, rsa->q, ctx);
+	// Derive the rest.
+	RSA_X931_derive_ex(
+		rsa,
+		NULL, NULL,
+		NULL, NULL,
+		NULL, NULL, NULL,
+		NULL, NULL, NULL,
+		rsa->e,
+		NULL
+	);
 
-	// Calculate D
-	BN_sub(r0, rsa->n, rsa->p);
-	BN_sub(r1, r0, rsa->q);
-	BN_add(r0, r1, BN_value_one());
-	BN_mod_inverse(rsa->d, rsa->e, r0, ctx);
-
-	// Calculate DMP1
-	if (rsa->dmp1 == NULL) {
-		rsa->dmp1 = BN_new();
-	}
-	BN_sub(r1, rsa->p, BN_value_one());
-	BN_mod(rsa->dmp1,rsa->d,r1,ctx);
-
-	// Calculate DMQ1
-	if (rsa->dmq1 == NULL) {
-		rsa->dmq1 = BN_new();
-	}
-	BN_sub(r2, rsa->q, BN_value_one());
-	BN_mod(rsa->dmq1,rsa->d,r2,ctx);
-
-	// Calculate IQMP
-	if (rsa->iqmp == NULL) {
-		rsa->iqmp = BN_new();
-	}
-	BN_mod_inverse(rsa->iqmp,rsa->q,rsa->p,ctx);
-
-	BN_free(r0);
-	BN_free(r1);
-	BN_free(r2);
-	BN_free(r3);
 	BN_CTX_free(ctx);
 }
 
