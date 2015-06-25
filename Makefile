@@ -6,7 +6,7 @@ LDFLAGS=-lcrypto
 
 all: msecret ecollect
 
-msecret: main.o lkdf.o msecret.o lkdf.o hmac_sha/hmac_sha256.o hmac_sha/sha2.o help.o
+msecret: main.o lkdf.o msecret.o lkdf.o hmac_sha/hmac_sha256.o hmac_sha/sha2.o help.o base58.o
 ecollect: ecollect.o hmac_sha/sha2.o
 
 test: lkdf-test msecret-test

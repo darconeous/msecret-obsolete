@@ -7,10 +7,13 @@
 #include "help.h"
 #include <sys/errno.h>
 #include <inttypes.h>
+#include "hmac_sha/sha2.h"
 #define HEADER_SHA_H 1
 #define SHA_DIGEST_LENGTH (160/8)
 #include <openssl/x509.h>
 #include <openssl/pem.h>
+#include <openssl/ec.h>
+#include "base58.h"
 
 
 int
@@ -58,10 +61,13 @@ static arg_list_item_t option_list[] = {
 	{   0, "format-bin",	NULL, "Output raw binary key"				},
 	{   0, "format-hex",	NULL, "Output hexidecimal key"				},
 	{   0, "format-dec",	NULL, "Output decimal key"				},
+	{   0, "format-b58",	NULL, "Output Base58 key"				},
 	{ 0, "dec-zero-fill", "X", "Zero fill key to X places"},
 	{ 0, "prime",	NULL, "Derive a large prime"				},
 	{ 0, "rsa",	NULL, "Derive a RSA private key"				},
 	{ 0, "rsa-public",	NULL, "Derive an RSA public key"				},
+	{ 0, "bitcoin-priv",	NULL, "Derive a bitcoin private key"				},
+	{ 0, "bitcoin-addr",	NULL, "Derive the associated bitcoin address"				},
 	{ 0 }
 };
 
@@ -92,6 +98,8 @@ main(int argc, char * argv[])
 		TYPE_EC,
 		TYPE_EC_PUBLIC,
 		TYPE_DSA_PARAM,
+		TYPE_BITCOIN_PRIV,
+		TYPE_BITCOIN_ADDR,
 	} secret_type;
 	bool gen_prime=false;
 
@@ -102,6 +110,7 @@ main(int argc, char * argv[])
 		OUTPUT_DEC,
 		OUTPUT_B64,
 		OUTPUT_B32,
+		OUTPUT_B58,
 	} output_format = OUTPUT_UNSPECIFIED;
 	RSA *rsa = NULL;
 
@@ -128,6 +137,14 @@ main(int argc, char * argv[])
 	{
 		output_format = OUTPUT_B32;
 	}
+	HANDLE_LONG_ARGUMENT("format-b58")
+	{
+		output_format = OUTPUT_B58;
+	}
+	HANDLE_LONG_ARGUMENT("format-btc")
+	{
+		output_format = OUTPUT_B58;
+	}
 	HANDLE_LONG_ARGUMENT("format-b16")
 	{
 		output_format = OUTPUT_HEX;
@@ -143,6 +160,40 @@ main(int argc, char * argv[])
 	HANDLE_LONG_ARGUMENT("prime")
 	{
 		secret_type = TYPE_PRIME;
+	}
+	HANDLE_LONG_ARGUMENT("bitcoin-priv")
+	{
+		secret_type = TYPE_BITCOIN_PRIV;
+		if (output_format == OUTPUT_UNSPECIFIED) {
+			output_format = OUTPUT_B58;
+		}
+		if (key_max != NULL) {
+			fprintf(stderr, "You can't specify key-max with bitcoin keys\n");
+			ret = EXIT_FAILURE;
+			goto bail;
+		}
+		if (key_byte_length >= 0) {
+			fprintf(stderr, "You can't specify key-length with bitcoin keys\n");
+			ret = EXIT_FAILURE;
+			goto bail;
+		}
+	}
+	HANDLE_LONG_ARGUMENT("bitcoin-addr")
+	{
+		secret_type = TYPE_BITCOIN_ADDR;
+		if (output_format == OUTPUT_UNSPECIFIED) {
+			output_format = OUTPUT_B58;
+		}
+		if (key_max != NULL) {
+			fprintf(stderr, "You can't specify key-max with bitcoin keys\n");
+			ret = EXIT_FAILURE;
+			goto bail;
+		}
+		if (key_byte_length >= 0) {
+			fprintf(stderr, "You can't specify key-length with bitcoin keys\n");
+			ret = EXIT_FAILURE;
+			goto bail;
+		}
 	}
 	HANDLE_LONG_ARGUMENT("rsa")
 	{
@@ -289,6 +340,34 @@ main(int argc, char * argv[])
 		break;
 	}
 	END_ARGUMENTS
+
+
+	if (secret_type == TYPE_BITCOIN_PRIV
+		|| secret_type == TYPE_BITCOIN_ADDR
+	) {
+		static const uint8_t bitcoin_mod[] = {
+			0xFF, 0xFF, 0xFF, 0xFF,
+			0xFF, 0xFF, 0xFF, 0xFF,
+			0xFF, 0xFF, 0xFF, 0xFF,
+			0xFF, 0xFF, 0xFF, 0xFE,
+			0xBA, 0xAE, 0xDC, 0xE6,
+			0xAF, 0x48, 0xA0, 0x3B,
+			0xBF, 0xD2, 0x5E, 0x8C,
+			0xD0, 0x36, 0x41, 0x41,
+		};
+
+		key_byte_length = sizeof(bitcoin_mod);
+
+		key_max = calloc(sizeof(bitcoin_mod), 1);
+		if (key_max == NULL) {
+			fprintf(stderr, "Malloc failure\n");
+			ret = EXIT_FAILURE;
+			goto bail;
+		}
+
+		memcpy(key_max, bitcoin_mod, sizeof(bitcoin_mod));
+	}
+
 
 	if (key_byte_length == -1) {
 		// Default key length is 128 bit (16 bytes).
@@ -474,10 +553,93 @@ main(int argc, char * argv[])
 			break;
 		}
 	} else {
-		switch (output_format) {
-			if (secret_type == TYPE_RSA) {
+		if (secret_type == TYPE_BITCOIN_PRIV) {
+			uint8_t tmp[SHA256_DIGEST_LENGTH];
+			EVP_MD_CTX md_ctx;
+
+			EVP_MD_CTX_init(&md_ctx);
+			SHA256_Data(output_key, key_byte_length, (char*)&tmp);
+			SHA256_Data(tmp, SHA256_DIGEST_LENGTH, (char*)tmp);
+
+			output_key = realloc(output_key, key_byte_length+6);
+			memmove(output_key+1, output_key, key_byte_length);
+
+			output_key[0] = 0x80;
+			key_byte_length += 1;
+
+			EVP_DigestInit(&md_ctx, EVP_sha256());
+			EVP_DigestUpdate(&md_ctx,output_key,key_byte_length);
+			EVP_DigestFinal(&md_ctx,tmp,NULL);
+			EVP_DigestInit(&md_ctx, EVP_sha256());
+			EVP_DigestUpdate(&md_ctx,tmp,SHA256_DIGEST_LENGTH);
+			EVP_DigestFinal(&md_ctx,tmp,NULL);
+
+			EVP_MD_CTX_cleanup(&md_ctx);
+
+			memcpy(output_key+key_byte_length, tmp, 4);
+
+			key_byte_length += 4;
+		} else if (secret_type == TYPE_BITCOIN_ADDR) {
+			EC_KEY *ec_key;
+			EC_POINT *ec_pub_key;
+			BIGNUM bn_key;
+			BIGNUM bn_x, bn_y;
+			uint8_t byte_x[32], byte_y[32];
+			const EC_GROUP *group = NULL;
+			EVP_MD_CTX md_ctx;
+			char hdr = 0x04;
+			//unsigned int dgstlen = 32;
+			uint8_t tmp[SHA256_DIGEST_LENGTH];
+
+			BN_init(&bn_key);
+			BN_init(&bn_x);
+			BN_init(&bn_y);
+			ec_key = EC_KEY_new_by_curve_name(NID_secp256k1);
+			group = EC_KEY_get0_group(ec_key);
+			ec_pub_key = EC_POINT_new(group);
+
+			BN_bin2bn(output_key, key_byte_length, &bn_key);
+			EC_KEY_set_private_key(ec_key, &bn_key);
+
+			if (!EC_POINT_mul(group, ec_pub_key, &bn_key, NULL, NULL, NULL)) {
+				fprintf(stderr,"Error at EC_POINT_mul.\n");
+				ret = EXIT_FAILURE;
+				goto bail;
 			}
-			break;
+
+			EC_POINT_get_affine_coordinates_GFp(group, ec_pub_key, &bn_x, &bn_y, NULL);
+
+			BN_bn2bin(&bn_x, byte_x);
+			BN_bn2bin(&bn_y, byte_y);
+
+			EVP_MD_CTX_init(&md_ctx);
+			EVP_DigestInit(&md_ctx, EVP_sha256());
+			EVP_DigestUpdate(&md_ctx,&hdr,1);
+			EVP_DigestUpdate(&md_ctx,byte_x,sizeof(byte_x));
+			EVP_DigestUpdate(&md_ctx,byte_y,sizeof(byte_y));
+			EVP_DigestFinal(&md_ctx,tmp,NULL);
+
+			EVP_DigestInit(&md_ctx, EVP_ripemd160());
+			EVP_DigestUpdate(&md_ctx,tmp,SHA256_DIGEST_LENGTH);
+			EVP_DigestFinal(&md_ctx,output_key+1,NULL);
+
+			output_key[0] = 0x00;
+			key_byte_length = 21;
+
+			EVP_DigestInit(&md_ctx, EVP_sha256());
+			EVP_DigestUpdate(&md_ctx,output_key,key_byte_length);
+			EVP_DigestFinal(&md_ctx,tmp,NULL);
+			EVP_DigestInit(&md_ctx, EVP_sha256());
+			EVP_DigestUpdate(&md_ctx,tmp,SHA256_DIGEST_LENGTH);
+			EVP_DigestFinal(&md_ctx,tmp,NULL);
+
+			EVP_MD_CTX_cleanup(&md_ctx);
+
+			memcpy(output_key+key_byte_length, tmp, 4);
+
+			key_byte_length +=4;
+		}
+		switch (output_format) {
 		case OUTPUT_DEC:
 			{
 				if (key_byte_length <= 4) {
@@ -510,6 +672,14 @@ main(int argc, char * argv[])
 		case OUTPUT_HEX:
 			hex_dump(stdout, output_key, key_byte_length, "");
 			fprintf(stdout, "\n");
+			break;
+		case OUTPUT_B58:
+			{
+				char output_string[key_byte_length*4];
+				output_string[0] = 0;
+
+				fprintf(stdout, "%s\n", encode_base58(output_string, sizeof(output_string), output_key, key_byte_length));
+			}
 			break;
 		case OUTPUT_RAW:
 			{

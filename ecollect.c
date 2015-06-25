@@ -31,7 +31,12 @@ add_entropy(uint8_t* pool, int pool_len, const uint8_t* entropy, int entropy_len
 		entropy_len -= pool_len;
 	}
 
-	// Step 1: XOR in the entropy.
+	if (entropy_len <= 0) {
+		// Nothing to do.
+		return;
+	}
+
+	// Step 1: XOR in the entropy, repeating if necessary.
 	for (i = 0; (entropy_len > 0) && (i <= (pool_len-1)/entropy_len); i++) {
 		int offset = i*entropy_len;
 		int len = entropy_len;
@@ -42,11 +47,6 @@ add_entropy(uint8_t* pool, int pool_len, const uint8_t* entropy, int entropy_len
 			break;
 		}
 		xorcpy(pool+offset, entropy, len);
-	}
-
-	if (entropy_len <= 0) {
-		// Nothing to do.
-		return;
 	}
 
 	// Step 2: Mix it up.
@@ -124,35 +124,51 @@ main(int argc, char * argv[])
 	uint8_t *epool = NULL;
 	int epool_size = 0;
 	size_t bytes_consumed = 0;
+
 	signal(SIGINT, &signal_handler);
 	signal(SIGTERM, &signal_handler);
+
 	if (argc < 2) {
 		fprintf(stderr,"syntax: %s <pool-file> [input-file]\n",argv[0]);
 		exit(EXIT_FAILURE);
 	}
+
 	fd = open(argv[1], O_RDWR);
-	if(fd<0) {
+
+	if (fd < 0) {
 		perror("open");
 		exit(EXIT_FAILURE);
 	}
+
 	epool_size = lseek(fd, 0, SEEK_END);
 	lseek(fd, 0, SEEK_SET);
 	epool = mmap(NULL, epool_size, PROT_READ|PROT_WRITE,MAP_FILE|MAP_SHARED,fd, 0);
-	if((epool == NULL) || (epool == MAP_FAILED)) {
+
+	if ((epool == NULL) || (epool == MAP_FAILED)) {
 		perror("mmap");
 		exit(EXIT_FAILURE);
 	}
+
 	fprintf(stderr,"mmapped %d bytes of %s\n",epool_size,argv[1]);
+
 	if (argc >= 3) {
 		stdin = fopen(argv[2], "r");
 		fprintf(stderr,"opened %s\n",argv[2]);
 	}
-	while(!feof(stdin) && !ferror(stdin) && !gInterrupted) {
-		uint8_t buffer[1024] = {};
-		int len;
-		len = fread(buffer, 1, epool_size>1024?1024:epool_size, stdin);
 
-		if (len<0) {
+	while (!feof(stdin) && !ferror(stdin) && !gInterrupted) {
+		uint8_t buffer[1024*20] = {};
+		int len;
+		len = fread(
+			buffer,
+			1,
+			epool_size > sizeof(buffer)
+				? sizeof(buffer)
+				: epool_size,
+			stdin
+		);
+
+		if (len < 0) {
 			perror("fread");
 			exit(EXIT_FAILURE);
 		}

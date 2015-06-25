@@ -8,7 +8,6 @@
 #include <string.h>
 #include <stdio.h>
 
-
 static uint8_t
 enclosing_mask_uint8(uint8_t x) {
 	x |= (x >> 1);
@@ -89,6 +88,11 @@ MSECRET_Extract_Prime_BN(
 		BN_set_word(e, RSA_F4);
 		HMAC_SHA256_UpdateMessage(&hmac, (const uint8_t*)"GCD65537=0:", 7);
 	}
+#if MSECRET_PRIME_LEELIM
+	if (flags & MSECRET_PRIME_LEELIM) {
+		HMAC_SHA256_UpdateMessage(&hmac, (const uint8_t*)"LeeLim:", 7);
+	}
+#endif
 	HMAC_SHA256_UpdateMessage(&hmac, (uint8_t*)&bit_length_be, sizeof(bit_length_be));
 	HMAC_SHA256_EndMessage(new_key_selector, &hmac);
 
@@ -111,9 +115,11 @@ MSECRET_Extract_Prime_BN(
 			continue;
 		}
 
-		if (flags & MSECRET_PRIME_LEELIM) {
+#if MSECRET_PRIME_LEELIM
+        if (flags & MSECRET_PRIME_LEELIM) {
 			// TODO: Check that the prime is a "Lee/Lim" prime.
 		}
+#endif
 
 		if (e != NULL) {
 			BN_sub(r0,prime,BN_value_one());

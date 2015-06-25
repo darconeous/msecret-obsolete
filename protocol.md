@@ -345,6 +345,13 @@ from the master secret are/will-be defined:
  *  DSAParameters
  *  ECPrivateKey
 
+There are also the following derived types:
+
+ *  EC256PPublicKey (Uses IntegerLessThanX)
+ *  EC256K1PublicKey (Uses IntegerLessThanX)
+ *  BitcoinAddress (Uses ECC256K1PublicKey)
+ *  RSAPublicKey (Uses RSAPrivateKey)
+
 When requesting each class of random value, you specify a key
 identifier and salt. The key identifier and salt are compressed using
 HMAC-SHA256 into a 256-bit key selector:
