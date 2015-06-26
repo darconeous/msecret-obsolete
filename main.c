@@ -14,6 +14,7 @@
 #include <openssl/pem.h>
 #include <openssl/ec.h>
 #include "base58.h"
+#include "base32.h"
 
 
 int
@@ -63,6 +64,7 @@ static arg_list_item_t option_list[] = {
 	{   0, "format-dec",	NULL, "Output decimal key"				},
 	{   0, "format-b58",	NULL, "Output Base58 key"				},
 	{ 0, "dec-zero-fill", "X", "Zero fill key to X places"},
+	{ 0, "integer",	NULL, "Derive a large integer (default)"				},
 	{ 0, "prime",	NULL, "Derive a large prime"				},
 	{ 0, "rsa",	NULL, "Derive a RSA private key"				},
 	{ 0, "rsa-public",	NULL, "Derive an RSA public key"				},
@@ -156,6 +158,14 @@ main(int argc, char * argv[])
 	HANDLE_LONG_ARGUMENT("format-raw")
 	{
 		output_format = OUTPUT_RAW;
+	}
+	HANDLE_LONG_ARGUMENT("format-bin")
+	{
+		output_format = OUTPUT_RAW;
+	}
+	HANDLE_LONG_ARGUMENT("integer")
+	{
+		secret_type = TYPE_INTEGER;
 	}
 	HANDLE_LONG_ARGUMENT("prime")
 	{
@@ -680,6 +690,20 @@ main(int argc, char * argv[])
 
 				fprintf(stdout, "%s\n", encode_base58(output_string, sizeof(output_string), output_key, key_byte_length));
 			}
+			break;
+		case OUTPUT_B32:
+			{
+				char output_string[key_byte_length*4];
+				output_string[0] = 0;
+
+				base32_encode(output_key, key_byte_length, (unsigned char*)output_string);
+				fprintf(stdout, "%s\n", output_string);
+			}
+			break;
+		case OUTPUT_B64:
+			fprintf(stderr, "Base64 output not yet implemented.\n");
+			ret = EXIT_FAILURE;
+			goto bail;
 			break;
 		case OUTPUT_RAW:
 			{
