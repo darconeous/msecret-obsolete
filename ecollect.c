@@ -37,16 +37,16 @@ add_entropy(uint8_t* pool, int pool_len, const uint8_t* entropy, int entropy_len
 	}
 
 	// Step 1: XOR in the entropy, repeating if necessary.
-	for (i = 0; (entropy_len > 0) && (i <= (pool_len-1)/entropy_len); i++) {
-		int offset = i*entropy_len;
+	for (i = 0; (entropy_len > 0) && (i <= (pool_len - 1) / entropy_len); i++) {
+		int offset = i * entropy_len;
 		int len = entropy_len;
-		if (offset+len > pool_len) {
+		if (offset + len > pool_len) {
 			len = pool_len - offset;
 		}
 		if (len < 0) {
 			break;
 		}
-		xorcpy(pool+offset, entropy, len);
+		xorcpy(pool + offset, entropy, len);
 	}
 
 	// Step 2: Mix it up.
@@ -57,16 +57,16 @@ add_entropy(uint8_t* pool, int pool_len, const uint8_t* entropy, int entropy_len
 		memcpy(pool, hashval, pool_len);
 	} else {
 		SHA256_Init(&hash);
-		SHA256_Update(&hash, pool+pool_len-SHA256_DIGEST_LENGTH, SHA256_DIGEST_LENGTH);
+		SHA256_Update(&hash, pool + pool_len - SHA256_DIGEST_LENGTH, SHA256_DIGEST_LENGTH);
 		SHA256_Update(&hash, pool, SHA256_DIGEST_LENGTH);
 		SHA256_Final(hashval, &hash);
 		memcpy(pool, hashval, SHA256_DIGEST_LENGTH);
 
-		for (i = 0; i < pool_len/SHA256_DIGEST_LENGTH; i++) {
-			int offset = i*SHA256_DIGEST_LENGTH;
-			int len = SHA256_DIGEST_LENGTH*2;
+		for (i = 0; i < pool_len / SHA256_DIGEST_LENGTH; i++) {
+			int offset = i * SHA256_DIGEST_LENGTH;
+			int len = SHA256_DIGEST_LENGTH * 2;
 
-			if (offset+len > pool_len) {
+			if (offset + len > pool_len) {
 				len = pool_len - offset;
 			}
 
@@ -75,10 +75,24 @@ add_entropy(uint8_t* pool, int pool_len, const uint8_t* entropy, int entropy_len
 			}
 
 			SHA256_Init(&hash);
-			SHA256_Update(&hash, pool+offset, len);
+			SHA256_Update(&hash, pool + offset, len);
 			SHA256_Final(hashval, &hash);
-			memcpy(pool+offset+SHA256_DIGEST_LENGTH, hashval, len-SHA256_DIGEST_LENGTH);
+			memcpy(pool + offset + SHA256_DIGEST_LENGTH, hashval, len - SHA256_DIGEST_LENGTH);
 		}
+	}
+
+	// Step 3: XOR in the entropy again, repeating if necessary.
+	// This helps frustrate active attacks.
+	for (i = 0; (entropy_len > 0) && (i <= (pool_len-1)/entropy_len); i++) {
+		int offset = i * entropy_len;
+		int len = entropy_len;
+		if (offset + len > pool_len) {
+			len = pool_len - offset;
+		}
+		if (len < 0) {
+			break;
+		}
+		xorcpy(pool + offset, entropy, len);
 	}
 }
 
@@ -92,9 +106,9 @@ hex_dump(FILE* file, const uint8_t *data, size_t data_len, const char* sep)
 	while(data_len > 0) {
 		int i = 0;
 		if (data_len == 1) {
-			i = fprintf(file,"%02X",*data);
+			i = fprintf(file,"%02X", *data);
 		} else {
-			i = fprintf(file, "%02X%s",*data, sep);
+			i = fprintf(file, "%02X%s", *data, sep);
 		}
 		if (i < 0) {
 			ret = i;
@@ -111,7 +125,8 @@ hex_dump(FILE* file, const uint8_t *data, size_t data_len, const char* sep)
 
 static int gInterrupted;
 static void
-signal_handler(int sig) {
+signal_handler(int sig)
+{
 	gInterrupted = 1;
 	fprintf(stderr, "Caught signal %d\n", sig);
 	signal(sig, NULL);

@@ -155,6 +155,10 @@ main(int argc, char * argv[])
 	{
 		output_format = OUTPUT_HEX;
 	}
+	HANDLE_LONG_ARGUMENT("format-bin")
+	{
+		output_format = OUTPUT_RAW;
+	}
 	HANDLE_LONG_ARGUMENT("format-raw")
 	{
 		output_format = OUTPUT_RAW;
@@ -666,13 +670,13 @@ main(int argc, char * argv[])
 					fprintf(stdout, format_string, v);
 					free(format_string);
 
-	/*
+#if 0
 				} else if (key_byte_length <= 8) {
 					uint64_t v = 0;
 					memcpy(((uint8_t*)&v)+8-key_byte_length, output_key, key_byte_length);
 					v = htonll(v);
 					fprintf(stdout, "%llu\n", v);
-	*/
+#endif
 				} else {
 					fprintf(stderr, "Key size too large for decimal mode\n");
 					ret = EXIT_FAILURE;
@@ -685,7 +689,7 @@ main(int argc, char * argv[])
 			break;
 		case OUTPUT_B58:
 			{
-				char output_string[key_byte_length*4];
+				char output_string[key_byte_length*5];
 				output_string[0] = 0;
 
 				fprintf(stdout, "%s\n", encode_base58(output_string, sizeof(output_string), output_key, key_byte_length));
@@ -693,7 +697,7 @@ main(int argc, char * argv[])
 			break;
 		case OUTPUT_B32:
 			{
-				char output_string[key_byte_length*4];
+				char output_string[key_byte_length*8];
 				output_string[0] = 0;
 
 				base32_encode(output_key, key_byte_length, (unsigned char*)output_string);

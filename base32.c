@@ -183,6 +183,7 @@ void base32_encode(const unsigned char *plain, size_t len, unsigned char *coded)
 	// here we just need to feed it the data sequence by sequence.
 	for (size_t i = 0, j = 0; i < len; i += 5, j += 8) {
 		encode_sequence(&plain[i], min(len - i, 5), &coded[j]);
+		coded[j+8] = 0;
 	}
 }
 

@@ -65,7 +65,7 @@ void LKDF_SHA256_Extract(
 	// --------------------------------------------------------
 	// Output key generation loop
 
-	for(n = 1 ; key_size != 0 ; n++) {
+	for (n = 1 ; key_size != 0 ; n++) {
 		int i, output_block_size;
 		int ikm_left, ikm_n;
 		const uint8_t* ikm_idx;
@@ -108,8 +108,8 @@ void LKDF_SHA256_Extract(
 			// IKM block counter (Big-endian)
 			HMAC_SHA256_UpdateMessage(
 				&hmac,
-				(uint8_t*)&ikm_n,
-				sizeof(ikm_n)
+				(uint8_t*)&be_ikm_n,
+				sizeof(be_ikm_n)
 			);
 
 			// Data from IKM block

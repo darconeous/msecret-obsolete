@@ -1,26 +1,35 @@
 
 
-CFLAGS=-g -O0  -Wno-deprecated-declarations
+CFLAGS = -g -O0 -Wno-deprecated-declarations
 
-LDFLAGS=-lcrypto
+LDFLAGS = -lcrypto
 
-all: msecret ecollect
+OPENSSL_PATH = /usr/include
+#OPENSSL_PATH = /Users/darco/homebrew/Cellar/openssl/1.0.2k
 
-msecret: main.o lkdf.o msecret.o lkdf.o hmac_sha/hmac_sha256.o hmac_sha/sha2.o help.o base58.o base32.o
-ecollect: ecollect.o hmac_sha/sha2.o
+CFLAGS += -I$(OPENSSL_PATH)/include
+LDFLAGS += -L$(OPENSSL_PATH)/lib
 
-test: lkdf-test msecret-test
+all : msecret ecollect
+
+test : lkdf-test msecret-test
 	./lkdf-test
+	./msecret-test
 
+msecret : main.o lkdf.o msecret.o lkdf.o hmac_sha/hmac_sha256.o hmac_sha/sha2.o help.o base58.o base32.o
+ecollect : ecollect.o hmac_sha/sha2.o
+
+lkdf-test : CFLAGS += -DLKDF_UNIT_TEST=1
 lkdf-test: lkdf-test.o hmac_sha/hmac_sha256.o hmac_sha/sha2.o
-msecret-test: lkdf.o msecret-test.o lkdf.o hmac_sha/hmac_sha256.o hmac_sha/sha2.o
 
+lkdf-test.o : lkdf.c
+	$(CC) -c $(CFLAGS) lkdf.c -o lkdf-test.o
 
-msecret-test.o: msecret.c
-	$(CC) -c -DMSECRET_UNIT_TEST=1 msecret.c -o msecret-test.o
+msecret-test : CFLAGS += -DMSECRET_UNIT_TEST=1
+msecret-test : lkdf.o msecret-test.o lkdf.o hmac_sha/hmac_sha256.o hmac_sha/sha2.o
 
-lkdf-test.o: lkdf.c
-	$(CC) -c -DLKDF_UNIT_TEST=1 lkdf.c -o lkdf-test.o
+msecret-test.o : msecret.c
+	$(CC) -c $(CFLAGS) msecret.c -o msecret-test.o
 
 clean:
 	$(RM) *.o hmac_sha/*.o msecret-test lkdf-test ecollect msecret

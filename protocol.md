@@ -1,5 +1,6 @@
 Warning: This document is practically a stream-of-consciousness, and
-several parts are out-of-date.
+several parts are out-of-date. It contains many errors, false-starts,
+and dead ends.
 
 # Master Secret Protocol #
 
@@ -263,7 +264,9 @@ designed for a distinct purpose.
 For example, using HKDF with HMAC-SHA256 to generate a 521-bit ECC key
 is not appropriate since the input keying material is compressed into
 just 256 bits, even if the input keying material is much larger than
-521 bits.
+521 bits. (EDIT: Note, this isn't actually true. The strength of an
+ECC key tends to be half the bits, which turns out to match fairly
+well with SHA256)
 
 One alternative is to break up the IKM into `hlen` sized blocks and
 apply the KDF multiple times, XORing the results into the final key.
@@ -300,6 +303,9 @@ where:
 
 Where n is represented with 4 octets, for a maximum generated key
 length of `hlen*(2^32-1)` bytes.
+
+EDIT: The mechanism described above has many issues and is not what
+is implemented in the source code of this repository.
 
 ---
 
@@ -426,3 +432,39 @@ Nested Keys can be identified using a slash:
 
     Master -> SuperSecret:Delegate -> DNSSEC:ZSK:example.com!2014Q1
     M/Delegate/DNSSEC:ZSK:example.com
+
+
+
+---------------------------
+
+
+
+
+List of keys
+
+
+* X.509 Encryption Certificates
+  * RSA-2048
+  * RSA-3072
+  * RSA-4096
+  * RSA-8192
+  * ECDH-NIST-P-256
+  * ECDH-NIST-P-348
+  * ECDH-NIST-P-521
+* OpenPGP Identities
+  * RSA-2048
+  * RSA-3072
+  * RSA-4096
+  * RSA-8192
+  * ECDH-NIST-P-256
+  * ECDH-NIST-P-348
+  * ECDH-NIST-P-521
+* SSH Keys
+  * RSA-4096
+  * RSA-8192
+  * ECDSA-NIST-P-256
+  * ECDSA-NIST-P-521
+  * EdDSA-Ed25519
+* Bitcoin Addresses
+  * 100 bitcoin addresses
+* SuperSecret

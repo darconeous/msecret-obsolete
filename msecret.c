@@ -69,31 +69,50 @@ MSECRET_Extract_Prime_BN(
 	const MSECRET_KeySelector key_selector,
 	const uint8_t *ikm, size_t ikm_size
 ) {
+	static const int kSupportedFlags = 0
+#if MSECRET_PRIME_LEELIM
+		| MSECRET_PRIME_LEELIM
+#endif
+		| MSECRET_PRIME_STD_EXPONENT;
+
 	MSECRET_KeySelector new_key_selector;
 	HMAC_SHA256_CTX hmac;
 	BIGNUM *max = BN_new();
 	BIGNUM *e = NULL;
-	uint32_t bit_length_be = htonl(bit_length);
 	BN_CTX *ctx = BN_CTX_new();
 	BIGNUM *r0 = BN_new();
 	BIGNUM *r1 = BN_new();
+
+	if (bit_length <= 0) {
+		fprintf(stderr,"MSECRET_Extract_Prime_BN: Invalid bit length (%d)\n", bit_length);
+		// TODO: Change this to return an error at some point.
+		abort();
+	}
+
+	if ((flags & ~kSupportedFlags) != 0) {
+		fprintf(stderr,"MSECRET_Extract_Prime_BN: Unexpected flags\n");
+		// TODO: Change this to return an error at some point.
+		abort();
+	}
 
 	HMAC_SHA256_Init(&hmac);
 	HMAC_SHA256_UpdateKey(&hmac, key_selector, sizeof(MSECRET_KeySelector));
 	HMAC_SHA256_EndKey(&hmac);
 	HMAC_SHA256_StartMessage(&hmac);
 	HMAC_SHA256_UpdateMessage(&hmac, (const uint8_t*)"Prime:", 6);
+
 	if (flags & MSECRET_PRIME_STD_EXPONENT) {
 		e = BN_new();
 		BN_set_word(e, RSA_F4);
-		HMAC_SHA256_UpdateMessage(&hmac, (const uint8_t*)"GCD65537=0:", 7);
+		HMAC_SHA256_UpdateMessage(&hmac, (const uint8_t*)"GCD65537=0:", 11);
 	}
+
 #if MSECRET_PRIME_LEELIM
 	if (flags & MSECRET_PRIME_LEELIM) {
 		HMAC_SHA256_UpdateMessage(&hmac, (const uint8_t*)"LeeLim:", 7);
 	}
 #endif
-	HMAC_SHA256_UpdateMessage(&hmac, (uint8_t*)&bit_length_be, sizeof(bit_length_be));
+
 	HMAC_SHA256_EndMessage(new_key_selector, &hmac);
 
 	BN_set_bit(max, bit_length);
@@ -118,13 +137,15 @@ MSECRET_Extract_Prime_BN(
 #if MSECRET_PRIME_LEELIM
         if (flags & MSECRET_PRIME_LEELIM) {
 			// TODO: Check that the prime is a "Lee/Lim" prime.
+			abort();
 		}
 #endif
 
 		if (e != NULL) {
-			BN_sub(r0,prime,BN_value_one());
-			BN_gcd(r1,r0,e,ctx);
+			BN_sub(r0, prime, BN_value_one());
+			BN_gcd(r1, r0, e, ctx);
 			if (!BN_is_one(r1)) {
+				// TODO: Calculate how often this really happens...
 				fprintf(stderr,"Note: Skipped prime where (p-1) was divisible by 65537\n");
 				continue;
 			}
@@ -142,7 +163,7 @@ MSECRET_Extract_Prime_BN(
 	BN_CTX_free(ctx);
 }
 
-
+#if 0
 void
 MSECRET_Extract_RSA_X931(
 	RSA *rsa,
@@ -159,8 +180,14 @@ MSECRET_Extract_RSA_X931(
 	BIGNUM *max = BN_CTX_get(ctx);
 	BIGNUM *max101 = BN_CTX_get(ctx);
 
-	bitsp = (mod_length+1)/2;
-	bitsq = mod_length-bitsp;
+	if (mod_length <= 0) {
+		fprintf(stderr, "MSECRET_Extract_RSA_X931: Invalid mod length (%d)\n", mod_length);
+		// TODO: Change this to return an error at some point.
+		abort();
+	}
+
+	bitsp = (mod_length + 1) / 2;
+	bitsq = mod_length - bitsp;
 
 	if (rsa->e == NULL) {
 		rsa->e = BN_new();
@@ -173,9 +200,12 @@ MSECRET_Extract_RSA_X931(
 	BN_set_bit(max, bitsp);
 	BN_sub_word(max, 1);
 
-	for(i=0; i<3; i++) {
+	for (i = 0; i < 3; i++) {
 		char sel_str[] = "Xp0";
+
+		// Mutate the above string to "Xp1", "Xp2"...
 		sel_str[2] += i;
+
 		MSECRET_CalcKeySelector(
 			new_key_selector,
 			key_selector, sizeof(MSECRET_KeySelector),
@@ -184,22 +214,28 @@ MSECRET_Extract_RSA_X931(
 
 		MSECRET_Extract_Integer_BN(
 			xp[i],
-			(i==0)?max:max101,
+			(i == 0)
+				? max
+				: max101,
 			new_key_selector,
 			ikm, ikm_size
 		);
 	}
+
 	BN_set_bit(xp[0], 0);
-	BN_set_bit(xp[0], bitsp-1);
-	BN_set_bit(xp[0], bitsp-2);
+	BN_set_bit(xp[0], bitsp - 1);
+	BN_set_bit(xp[0], bitsp - 2);
 
 	BN_zero(max);
 	BN_set_bit(max, bitsq);
 	BN_sub_word(max, 1);
 
-	for(i=0; i<3; i++) {
+	for (i = 0; i < 3; i++) {
 		char sel_str[] = "Xq0";
+
+		// Mutate the above string to "Xq1", "Xq2"...
 		sel_str[2] += i;
+
 		MSECRET_CalcKeySelector(
 			new_key_selector,
 			key_selector, sizeof(MSECRET_KeySelector),
@@ -208,14 +244,17 @@ MSECRET_Extract_RSA_X931(
 
 		MSECRET_Extract_Integer_BN(
 			xq[i],
-			(i==0)?max:max101,
+			(i == 0)
+				? max
+				: max101,
 			new_key_selector,
 			ikm, ikm_size
 		);
 	}
+
 	BN_set_bit(xq[0], 0);
-	BN_set_bit(xq[0], bitsq-1);
-	BN_set_bit(xq[0], bitsq-2);
+	BN_set_bit(xq[0], bitsq - 1);
+	BN_set_bit(xq[0], bitsq - 2);
 
 	RSA_X931_derive_ex(
 		rsa,
@@ -229,7 +268,7 @@ MSECRET_Extract_RSA_X931(
 
 	BN_CTX_free(ctx);
 }
-
+#endif
 
 
 void
@@ -240,19 +279,28 @@ MSECRET_Extract_RSA(
 	const MSECRET_KeySelector key_selector,
 	const uint8_t *ikm, size_t ikm_size
 ) {
+	static const int kSupportedFlags = 0;
 	// TODO: Review http://www.opensource.apple.com/source/OpenSSL097/OpenSSL097-16/openssl/crypto/rsa/rsa_gen.c
-	uint32_t salt = 0, be_salt = 0;
-	MSECRET_KeySelector new_key_selector;
+	uint32_t mod_length_be = htonl(mod_length);
+	MSECRET_KeySelector prime_key_selector;
 	int bitsp, bitsq;
 	HMAC_SHA256_CTX hmac;
 	BN_CTX *ctx = BN_CTX_new();
-	BIGNUM *r0 = BN_new();
-	BIGNUM *r1 = BN_new();
-	BIGNUM *r2 = BN_new();
-	BIGNUM *r3 = BN_new();
 
-	bitsp = (mod_length+1)/2;
-	bitsq = mod_length-bitsp;
+	if ((flags & ~kSupportedFlags) != 0) {
+		fprintf(stderr,"MSECRET_Extract_RSA: Unexpected flags\n");
+		// TODO: Change this to return an error at some point.
+		abort();
+	}
+
+	if (mod_length <= 0) {
+		fprintf(stderr,"MSECRET_Extract_RSA: Invalid mod length (%d)\n", mod_length);
+		// TODO: Change this to return an error at some point.
+		abort();
+	}
+
+	bitsp = (mod_length + 1) / 2;
+	bitsq = mod_length - bitsp;
 
 	if (rsa->p == NULL) {
 		rsa->p = BN_new();
@@ -268,44 +316,45 @@ MSECRET_Extract_RSA(
 	}
 
 	MSECRET_CalcKeySelector(
-		new_key_selector,
+		prime_key_selector,
 		key_selector, sizeof(MSECRET_KeySelector),
-		"RSAPrivateKey:p", 0
+		"RSA:a", 5
 	);
 
 	MSECRET_Extract_Prime_BN(
 		rsa->p,
 		bitsp,
 		flags | MSECRET_PRIME_STD_EXPONENT,
-		new_key_selector,
+		prime_key_selector,
 		ikm, ikm_size
 	);
 
 	MSECRET_CalcKeySelector(
-		new_key_selector,
+		prime_key_selector,
 		key_selector, sizeof(MSECRET_KeySelector),
-		"RSAPrivateKey:q", 0
+		"RSA:b", 5
 	);
 
 	MSECRET_Extract_Prime_BN(
 		rsa->q,
 		bitsq,
 		flags | MSECRET_PRIME_STD_EXPONENT,
-		new_key_selector,
+		prime_key_selector,
 		ikm, ikm_size
 	);
 
-	assert(BN_cmp(rsa->p,rsa->q) != 0);
+	assert(BN_cmp(rsa->p, rsa->q) != 0);
 
 	// P should be the larger of the two, by convention.
-	if (BN_cmp(rsa->p,rsa->q) < 0)
+	if (BN_cmp(rsa->p, rsa->q) < 0)
 	{
 		BIGNUM *tmp=rsa->p;
 		rsa->p=rsa->q;
 		rsa->q=tmp;
 	}
 
-	// Derive the rest.
+#if 0
+   // Derive the rest.
 	RSA_X931_derive_ex(
 		rsa,
 		NULL, NULL,
@@ -315,6 +364,50 @@ MSECRET_Extract_RSA(
 		rsa->e,
 		NULL
 	);
+#else
+	BIGNUM *r0 = BN_CTX_get(ctx);
+	BIGNUM *r1 = BN_CTX_get(ctx);
+	BIGNUM *r2 = BN_CTX_get(ctx);
+	BIGNUM *r3 = BN_CTX_get(ctx);
+
+	if (rsa->n == NULL) {
+		rsa->n = BN_new();
+	}
+
+	if (rsa->d == NULL) {
+		rsa->d = BN_new();
+	}
+
+	// Calculate N
+	BN_mul(rsa->n, rsa->p, rsa->q, ctx);
+
+	// Calculate D
+	BN_sub(r0, rsa->n, rsa->p);
+	BN_sub(r1, r0, rsa->q);
+	BN_add(r0, r1, BN_value_one());
+	BN_mod_inverse(rsa->d, rsa->e, r0, ctx);
+
+	// Calculate DMP1
+	if (rsa->dmp1 == NULL) {
+		rsa->dmp1 = BN_new();
+	}
+	BN_sub(r1, rsa->p, BN_value_one());
+	BN_mod(rsa->dmp1,rsa->d,r1,ctx);
+
+	// Calculate DMQ1
+	if (rsa->dmq1 == NULL) {
+		rsa->dmq1 = BN_new();
+	}
+	BN_sub(r2, rsa->q, BN_value_one());
+	BN_mod(rsa->dmq1,rsa->d,r2,ctx);
+
+	// Calculate IQMP
+	if (rsa->iqmp == NULL) {
+		rsa->iqmp = BN_new();
+	}
+	BN_mod_inverse(rsa->iqmp,rsa->q,rsa->p,ctx);
+
+#endif
 
 	BN_CTX_free(ctx);
 }
@@ -334,13 +427,16 @@ MSECRET_Extract_Integer(
 	salt--;
 
 	// Skip any leading zero bytes in the modulous
-	while(mod_size && (*max_in == 0)) {
+	while (mod_size && (*max_in == 0)) {
 		*key_out++ = 0;
 		max_in++;
 		mod_size--;
 	}
 
 	// Search for a key which satisfies the modulous
+	// We can end up attempting this multiple times
+	// in order to satisfy the modulus. This ensures
+	// that we have a uniform distribution.
 	do {
 		salt++;
 		be_salt = htonl(salt);
@@ -349,7 +445,7 @@ MSECRET_Extract_Integer(
 		HMAC_SHA256_UpdateKey(&hmac, key_selector, sizeof(MSECRET_KeySelector));
 		HMAC_SHA256_EndKey(&hmac);
 		HMAC_SHA256_StartMessage(&hmac);
-		HMAC_SHA256_UpdateMessage(&hmac, (const uint8_t*)"Integer:", 7);
+		HMAC_SHA256_UpdateMessage(&hmac, (const uint8_t*)"Integer:", 8);
 		HMAC_SHA256_UpdateMessage(&hmac, max_in, mod_size);
 		HMAC_SHA256_UpdateMessage(&hmac, (uint8_t*)&be_salt, sizeof(be_salt));
 		HMAC_SHA256_EndMessage(new_key_selector, &hmac);
@@ -373,19 +469,22 @@ int
 hex_dump(FILE* file, const uint8_t *data, size_t data_len)
 {
 	int ret = 0;
-	while(data_len > 0) {
+	while (data_len > 0) {
 		int i = 0;
 		if (data_len == 1) {
 			i = fprintf(file,"%02X",*data);
 		} else {
 			i = fprintf(file, "%02X ",*data);
 		}
+
 		if (i < 0) {
 			ret = i;
 		}
+
 		if (i <= 0) {
 			break;
 		}
+
 		ret += i;
 		data_len--;
 		data++;
