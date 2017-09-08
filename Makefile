@@ -4,8 +4,8 @@ CFLAGS = -g -O0 -Wno-deprecated-declarations
 
 LDFLAGS = -lcrypto
 
-OPENSSL_PATH = /usr/include
-#OPENSSL_PATH = /Users/darco/homebrew/Cellar/openssl/1.0.2k
+#OPENSSL_PATH = /usr
+OPENSSL_PATH = $(HOME)/homebrew/opt/openssl
 
 CFLAGS += -I$(OPENSSL_PATH)/include
 LDFLAGS += -L$(OPENSSL_PATH)/lib

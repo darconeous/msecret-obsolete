@@ -25,7 +25,11 @@ MSECRET_CalcKeySelector(
 	if ((info != NULL) && (info_size == 0)) {
 		info_size = strlen(info);
 	}
-	return LKDF_SHA256_CalcKeySelector(keySelector_out,salt,salt_size,(const uint8_t*)info, info_size);
+	return LKDF_SHA256_CalcKeySelector(
+		keySelector_out,
+		salt, salt_size,
+		(const uint8_t*)info, info_size
+	);
 }
 
 void MSECRET_Extract_Bytes(
@@ -38,6 +42,51 @@ void MSECRET_Extract_Bytes(
 		key_selector,
 		ikm, ikm_size
 	);
+}
+
+void
+MSECRET_Extract_Integer(
+	uint8_t *key_out,
+	const uint8_t *max_in, size_t mod_size,
+	const MSECRET_KeySelector key_selector,
+	const uint8_t *ikm, size_t ikm_size
+) {
+	MSECRET_KeySelector new_key_selector;
+
+	// Copy over the key selector. We will end up
+	// mutating this, possibly multiple times to
+	// satisfy the maximum.
+	memcpy(new_key_selector, key_selector, sizeof(MSECRET_KeySelector));
+
+	// Skip any leading zero bytes in the modulous
+	while (mod_size && (*max_in == 0)) {
+		*key_out++ = 0;
+		max_in++;
+		mod_size--;
+	}
+
+	// Search for a key which satisfies the modulous
+	// We can end up attempting this multiple times
+	// in order to satisfy the modulus. This ensures
+	// that we have a uniform distribution.
+	do {
+		MSECRET_CalcKeySelector(
+			new_key_selector,
+			new_key_selector, sizeof(MSECRET_KeySelector),
+			(const char*)max_in, mod_size
+		);
+
+		MSECRET_Extract_Bytes(
+			key_out, mod_size,
+			new_key_selector,
+			ikm, ikm_size
+		);
+
+		// Mask the unnecessary bits of the first
+		// byte. This makes the search faster.
+		key_out[0] &= enclosing_mask_uint8(max_in[0]);
+
+	} while( memcmp(key_out, max_in, mod_size) > 0 );
 }
 
 void
@@ -412,55 +461,59 @@ MSECRET_Extract_RSA(
 	BN_CTX_free(ctx);
 }
 
-void
-MSECRET_Extract_Integer(
-	uint8_t *key_out,
-	const uint8_t *max_in, size_t mod_size,
+void MSECRET_Extract_EC_KEY(
+	EC_KEY *ec_key_out,
 	const MSECRET_KeySelector key_selector,
 	const uint8_t *ikm, size_t ikm_size
 ) {
-	uint32_t salt = 0, be_salt = 0;
+	BN_CTX *ctx = BN_CTX_new();
+	const EC_GROUP *group = EC_KEY_get0_group(ec_key_out);
+	BIGNUM *order = BN_CTX_get(ctx);
+	BIGNUM *privateKey = BN_CTX_get(ctx);
 	MSECRET_KeySelector new_key_selector;
-	HMAC_SHA256_CTX hmac;
+	EC_POINT *ec_pub_key = NULL;
 
-	// Cancel out the initial increment in the loop.
-	salt--;
-
-	// Skip any leading zero bytes in the modulous
-	while (mod_size && (*max_in == 0)) {
-		*key_out++ = 0;
-		max_in++;
-		mod_size--;
+	if (group == NULL) {
+		fprintf(stderr,"MSECRET_Extract_EC_KEY: No group specified\n");
+		// TODO: Change this to return an error at some point.
+		abort();
 	}
 
-	// Search for a key which satisfies the modulous
-	// We can end up attempting this multiple times
-	// in order to satisfy the modulus. This ensures
-	// that we have a uniform distribution.
-	do {
-		salt++;
-		be_salt = htonl(salt);
+	if (!EC_GROUP_get_order(group, order, ctx)) {
+		fprintf(stderr,"MSECRET_Extract_EC_KEY: Unable to extract order\n");
+		// TODO: Change this to return an error at some point.
+		abort();
+	}
 
-		HMAC_SHA256_Init(&hmac);
-		HMAC_SHA256_UpdateKey(&hmac, key_selector, sizeof(MSECRET_KeySelector));
-		HMAC_SHA256_EndKey(&hmac);
-		HMAC_SHA256_StartMessage(&hmac);
-		HMAC_SHA256_UpdateMessage(&hmac, (const uint8_t*)"Integer:", 8);
-		HMAC_SHA256_UpdateMessage(&hmac, max_in, mod_size);
-		HMAC_SHA256_UpdateMessage(&hmac, (uint8_t*)&be_salt, sizeof(be_salt));
-		HMAC_SHA256_EndMessage(new_key_selector, &hmac);
+	// TODO: Derive a new selector based on the group...?
+	memcpy(new_key_selector, key_selector, sizeof(MSECRET_KeySelector));
 
-		MSECRET_Extract_Bytes(
-			key_out, mod_size,
-			new_key_selector,
-			ikm, ikm_size
-		);
+	MSECRET_Extract_Integer_BN(
+		privateKey,
+		order,
+		new_key_selector,
+		ikm, ikm_size
+	);
 
-		// Mask the unnecessary bits of the first
-		// byte. This makes the search faster.
-		key_out[0] &= enclosing_mask_uint8(max_in[0]);
+	EC_KEY_set_private_key(ec_key_out, privateKey);
 
-	} while( memcmp(key_out, max_in, mod_size) > 0 );
+	ec_pub_key = EC_POINT_new(group);
+	if (!EC_POINT_mul(group, ec_pub_key, privateKey, NULL, NULL, NULL)) {
+		fprintf(stderr,"Error at EC_POINT_mul.\n");
+		// TODO: Change this to return an error at some point.
+		abort();
+	}
+
+	EC_KEY_set_public_key(ec_key_out, ec_pub_key);
+
+	if (!EC_KEY_check_key(ec_key_out)) {
+		fprintf(stderr,"Error at EC_KEY_check_key.\n");
+		// TODO: Change this to return an error at some point.
+		abort();
+	}
+
+	EC_POINT_free(ec_pub_key);
+	BN_CTX_free(ctx);
 }
 
 #if MSECRET_UNIT_TEST

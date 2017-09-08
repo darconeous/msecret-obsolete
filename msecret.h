@@ -10,12 +10,13 @@
 #include "lkdf.h"
 #include <openssl/bn.h>
 #include <openssl/rsa.h>
+#include <openssl/ec.h>
 
 typedef LKDF_SHA256_KeySelector MSECRET_KeySelector;
 
 //#define MSECRET_PRIME_SAFE              (1<<1)	// Don't use.
 //#define MSECRET_PRIME_STRONG            (1<<2)	// Don't use.
-#define MSECRET_PRIME_LEELIM            (1<<3)
+//#define MSECRET_PRIME_LEELIM            (1<<3)
 #define MSECRET_PRIME_STD_EXPONENT      (1<<31)
 
 void MSECRET_CalcKeySelector(
@@ -56,6 +57,13 @@ void MSECRET_Extract_RSA(
 	RSA *rsa,
 	int mod_length,
 	int flags,
+	const MSECRET_KeySelector key_selector,
+	const uint8_t *ikm, size_t ikm_size
+);
+
+/* Note: group must already be set on EC_KEY */
+void MSECRET_Extract_EC_KEY(
+	EC_KEY *ec_key_out,
 	const MSECRET_KeySelector key_selector,
 	const uint8_t *ikm, size_t ikm_size
 );

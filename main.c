@@ -1,4 +1,5 @@
 
+#include <assert.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -8,14 +9,17 @@
 #include <sys/errno.h>
 #include <inttypes.h>
 #include "hmac_sha/sha2.h"
+
 #define HEADER_SHA_H 1
 #define SHA_DIGEST_LENGTH (160/8)
+
 #include <openssl/x509.h>
 #include <openssl/pem.h>
 #include <openssl/ec.h>
 #include "base58.h"
 #include "base32.h"
 
+#define MASTER_SECRET_BLOCK_SIZE (1024*4)
 
 int
 hex_dump(FILE* file, const uint8_t *data, size_t data_len, const char* sep)
@@ -57,19 +61,25 @@ static arg_list_item_t option_list[] = {
 	{ 'i', "input",	NULL, "Input file (use '-' for stdin)"				},
 	{ 'o', "output",	NULL, "Output file (stdout is default)"				},
 	{ 'k', "key-identifier",	"KID", "Key identifier (default is empty string)"				},
-	{ 0, "key-max",	"n", "Maximum numerical value for key"				},
-	{ 'l', "key-length",	"bytes", "key length, in bytes"				},
+	{ 0, "key-max",	"n", "Maximum numerical value for output key"				},
+	{ 'l', "key-length",	"bytes", "output key length, in bytes"				},
 	{   0, "format-bin",	NULL, "Output raw binary key"				},
 	{   0, "format-hex",	NULL, "Output hexidecimal key"				},
 	{   0, "format-dec",	NULL, "Output decimal key"				},
 	{   0, "format-b58",	NULL, "Output Base58 key"				},
+	{   0, "format-b32",	NULL, "Output Base32 key"				},
+	{   0, "format-der",	NULL, "Output DER"				},
+	{   0, "format-pem",	NULL, "Output PEM"				},
+	{   0, "format-rsa",	NULL, "Output PEM (RSA)"				},
 	{ 0, "dec-zero-fill", "X", "Zero fill key to X places"},
 	{ 0, "integer",	NULL, "Derive a large integer (default)"				},
 	{ 0, "prime",	NULL, "Derive a large prime"				},
-	{ 0, "rsa",	NULL, "Derive a RSA private key"				},
-	{ 0, "rsa-public",	NULL, "Derive an RSA public key"				},
+	{ 0, "ec", "curve-name", "Derive a EC private key"				},
+	{ 0, "rsa",	NULL, "Derive a RSA key"				},
+	{ 0, "private",	NULL, "Output private key"				},
 	{ 0, "bitcoin-priv",	NULL, "Derive a bitcoin private key"				},
 	{ 0, "bitcoin-addr",	NULL, "Derive the associated bitcoin address"				},
+	{ 0, "list-curves", NULL, "Print out list of supported curves"				},
 	{ 0 }
 };
 
@@ -96,12 +106,9 @@ main(int argc, char * argv[])
 		TYPE_INTEGER,
 		TYPE_PRIME,
 		TYPE_RSA,
-		TYPE_RSA_PUBLIC,
 		TYPE_EC,
-		TYPE_EC_PUBLIC,
 		TYPE_DSA_PARAM,
-		TYPE_BITCOIN_PRIV,
-		TYPE_BITCOIN_ADDR,
+		TYPE_BITCOIN,
 	} secret_type;
 	bool gen_prime=false;
 
@@ -113,8 +120,14 @@ main(int argc, char * argv[])
 		OUTPUT_B64,
 		OUTPUT_B32,
 		OUTPUT_B58,
+		OUTPUT_DER,
+		OUTPUT_PEM,
+		OUTPUT_PEM_RSA,
 	} output_format = OUTPUT_UNSPECIFIED;
 	RSA *rsa = NULL;
+	EC_KEY *ec_key = NULL;
+	EVP_PKEY* pkey = NULL;
+	bool outputPrivateKey = false;
 
 	secret_type = TYPE_BYTES;
 
@@ -167,6 +180,22 @@ main(int argc, char * argv[])
 	{
 		output_format = OUTPUT_RAW;
 	}
+	HANDLE_LONG_ARGUMENT("format-pem")
+	{
+		output_format = OUTPUT_PEM;
+	}
+	HANDLE_LONG_ARGUMENT("format-der")
+	{
+		output_format = OUTPUT_DER;
+	}
+	HANDLE_LONG_ARGUMENT("format-pem-rsa")
+	{
+		output_format = OUTPUT_PEM_RSA;
+	}
+	HANDLE_LONG_ARGUMENT("format-rsa")
+	{
+		output_format = OUTPUT_PEM_RSA;
+	}
 	HANDLE_LONG_ARGUMENT("integer")
 	{
 		secret_type = TYPE_INTEGER;
@@ -175,26 +204,13 @@ main(int argc, char * argv[])
 	{
 		secret_type = TYPE_PRIME;
 	}
-	HANDLE_LONG_ARGUMENT("bitcoin-priv")
+	HANDLE_LONG_ARGUMENT("private")
 	{
-		secret_type = TYPE_BITCOIN_PRIV;
-		if (output_format == OUTPUT_UNSPECIFIED) {
-			output_format = OUTPUT_B58;
-		}
-		if (key_max != NULL) {
-			fprintf(stderr, "You can't specify key-max with bitcoin keys\n");
-			ret = EXIT_FAILURE;
-			goto bail;
-		}
-		if (key_byte_length >= 0) {
-			fprintf(stderr, "You can't specify key-length with bitcoin keys\n");
-			ret = EXIT_FAILURE;
-			goto bail;
-		}
+		outputPrivateKey = true;
 	}
-	HANDLE_LONG_ARGUMENT("bitcoin-addr")
+	HANDLE_LONG_ARGUMENT("bitcoin")
 	{
-		secret_type = TYPE_BITCOIN_ADDR;
+		secret_type = TYPE_BITCOIN;
 		if (output_format == OUTPUT_UNSPECIFIED) {
 			output_format = OUTPUT_B58;
 		}
@@ -208,21 +224,45 @@ main(int argc, char * argv[])
 			ret = EXIT_FAILURE;
 			goto bail;
 		}
+		ec_key = EC_KEY_new_by_curve_name(NID_secp256k1);
+		key_byte_length = 32;
+	}
+	HANDLE_LONG_ARGUMENT("ec")
+	{
+		const char* curve_name = argv[++i];
+		int nid = OBJ_sn2nid(curve_name);
+		if (nid == NID_undef) {
+			nid = OBJ_ln2nid(curve_name);
+		}
+		if (nid == NID_undef) {
+			nid = (int)strtol(curve_name, NULL, 0);
+		}
+		secret_type = TYPE_EC;
+		if (output_format == OUTPUT_UNSPECIFIED) {
+			output_format = OUTPUT_PEM;
+		}
+		if (ec_key != NULL) {
+			fprintf(stderr, "Already specified a EC key type\n");
+			ret = EXIT_FAILURE;
+			goto bail;
+		}
+		ec_key = EC_KEY_new_by_curve_name(nid);
+		if (ec_key == NULL) {
+			fprintf(stderr, "Unknown curve named \"%s\"\n", curve_name);
+			ret = EXIT_FAILURE;
+			goto bail;
+		}
+		key_byte_length = 128; // Just set this to be big for now.
 	}
 	HANDLE_LONG_ARGUMENT("rsa")
 	{
 		secret_type = TYPE_RSA;
 		if (output_format == OUTPUT_UNSPECIFIED) {
-			output_format = OUTPUT_RAW;
-			output_format = OUTPUT_B64;
+			output_format = OUTPUT_PEM_RSA;
 		}
-	}
-	HANDLE_LONG_ARGUMENT("rsa-public")
-	{
-		secret_type = TYPE_RSA_PUBLIC;
-		if (output_format == OUTPUT_UNSPECIFIED) {
-			output_format = OUTPUT_RAW;
-			output_format = OUTPUT_B64;
+		if (key_byte_length == -1) {
+			// Default key length is 2048 bit.
+			key_byte_length = 2048/8;
 		}
 	}
 	HANDLE_LONG_ARGUMENT("key-identifier")
@@ -231,7 +271,13 @@ main(int argc, char * argv[])
 	}
 	HANDLE_LONG_ARGUMENT("dec-zero-fill")
 	{
-		zero_fill_digits = (unsigned int)strtol(argv[++i], NULL, 0);
+		long val = strtol(argv[++i], NULL, 0);
+		if (val < 0) {
+			fprintf(stderr, "Cannot zero-fill negative zeros\n");
+			ret = EXIT_FAILURE;
+			goto bail;
+		}
+		zero_fill_digits = (unsigned int)val;
 	}
 	HANDLE_LONG_ARGUMENT("key-max")
 	{
@@ -356,33 +402,6 @@ main(int argc, char * argv[])
 	END_ARGUMENTS
 
 
-	if (secret_type == TYPE_BITCOIN_PRIV
-		|| secret_type == TYPE_BITCOIN_ADDR
-	) {
-		static const uint8_t bitcoin_mod[] = {
-			0xFF, 0xFF, 0xFF, 0xFF,
-			0xFF, 0xFF, 0xFF, 0xFF,
-			0xFF, 0xFF, 0xFF, 0xFF,
-			0xFF, 0xFF, 0xFF, 0xFE,
-			0xBA, 0xAE, 0xDC, 0xE6,
-			0xAF, 0x48, 0xA0, 0x3B,
-			0xBF, 0xD2, 0x5E, 0x8C,
-			0xD0, 0x36, 0x41, 0x41,
-		};
-
-		key_byte_length = sizeof(bitcoin_mod);
-
-		key_max = calloc(sizeof(bitcoin_mod), 1);
-		if (key_max == NULL) {
-			fprintf(stderr, "Malloc failure\n");
-			ret = EXIT_FAILURE;
-			goto bail;
-		}
-
-		memcpy(key_max, bitcoin_mod, sizeof(bitcoin_mod));
-	}
-
-
 	if (key_byte_length == -1) {
 		// Default key length is 128 bit (16 bytes).
 		key_byte_length = 16;
@@ -405,7 +424,6 @@ main(int argc, char * argv[])
 		goto bail;
 	}
 
-#define MASTER_SECRET_BLOCK_SIZE (1024*4)
 	master_secret = calloc(MASTER_SECRET_BLOCK_SIZE, 1);
 
 	if (master_secret == NULL) {
@@ -487,12 +505,20 @@ main(int argc, char * argv[])
 			BN_bn2bin(prime, output_key);
 			key_byte_length = BN_num_bytes(prime);
 			BN_free(prime);
-		} else if ((secret_type == TYPE_RSA) || (secret_type == TYPE_RSA_PUBLIC)) {
+		} else if (secret_type == TYPE_RSA) {
 			rsa = RSA_new();
 			MSECRET_Extract_RSA(
 				rsa,
 			    key_byte_length*8,
 				0,
+				key_selector,
+				master_secret, master_secret_len
+			);
+		} else if (secret_type == TYPE_BITCOIN
+			|| secret_type == TYPE_EC
+		) {
+			MSECRET_Extract_EC_KEY(
+				ec_key,
 				key_selector,
 				master_secret, master_secret_len
 			);
@@ -516,60 +542,17 @@ main(int argc, char * argv[])
 		);
 	}
 
-	if (secret_type == TYPE_RSA) {
-		if(debug_mode)RSA_print_fp(stderr, rsa, 0);
-		switch (output_format) {
-		case OUTPUT_UNSPECIFIED:
-		case OUTPUT_RAW:
-			i2d_RSAPrivateKey_fp(stdout,rsa);
-			break;
-		case OUTPUT_B64:
-			{
-				EVP_PKEY* private_key = EVP_PKEY_new();
-				EVP_PKEY_set1_RSA(private_key, rsa);
-				PEM_write_PrivateKey(
-					stdout,
-					private_key,
-					NULL,
-					NULL, 0, NULL, NULL
-				);
-				EVP_PKEY_free(private_key);
-			}
-			break;
-		default:
-			fprintf(stderr, "Invalid output format\n");
-			ret = EXIT_FAILURE;
-			goto bail;
-			break;
-		}
-	} else if (secret_type == TYPE_RSA_PUBLIC) {
-		if(debug_mode)RSA_print_fp(stderr, rsa, 0);
-		switch (output_format) {
-		case OUTPUT_UNSPECIFIED:
-		case OUTPUT_RAW:
-			i2d_RSAPublicKey_fp(stdout,rsa);
-			break;
-		case OUTPUT_B64:
-			{
-				EVP_PKEY* private_key = EVP_PKEY_new();
-				EVP_PKEY_set1_RSA(private_key, rsa);
-				PEM_write_RSAPublicKey(
-					stdout,
-					rsa
-				);
-				EVP_PKEY_free(private_key);
-			}
-			break;
-		default:
-			fprintf(stderr, "Invalid output format\n");
-			ret = EXIT_FAILURE;
-			goto bail;
-			break;
-		}
-	} else {
-		if (secret_type == TYPE_BITCOIN_PRIV) {
+	if (secret_type == TYPE_BITCOIN) {
+		if (outputPrivateKey) {
 			uint8_t tmp[SHA256_DIGEST_LENGTH];
 			EVP_MD_CTX md_ctx;
+
+			const BIGNUM* ec_private_key;
+			ec_private_key = EC_KEY_get0_private_key(ec_key);
+			assert(output_key != NULL);
+			assert(key_byte_length >= 32);
+			BN_bn2bin(ec_private_key, output_key);
+			key_byte_length = 32;
 
 			EVP_MD_CTX_init(&md_ctx);
 			SHA256_Data(output_key, key_byte_length, (char*)&tmp);
@@ -593,33 +576,23 @@ main(int argc, char * argv[])
 			memcpy(output_key+key_byte_length, tmp, 4);
 
 			key_byte_length += 4;
-		} else if (secret_type == TYPE_BITCOIN_ADDR) {
-			EC_KEY *ec_key;
-			EC_POINT *ec_pub_key;
-			BIGNUM bn_key;
-			BIGNUM bn_x, bn_y;
-			uint8_t byte_x[32], byte_y[32];
+		} else {
 			const EC_GROUP *group = NULL;
+			const EC_POINT *ec_pub_key = NULL;
+			uint8_t byte_x[32], byte_y[32];
 			EVP_MD_CTX md_ctx;
 			char hdr = 0x04;
-			//unsigned int dgstlen = 32;
 			uint8_t tmp[SHA256_DIGEST_LENGTH];
+			BIGNUM bn_key;
+			BIGNUM bn_x, bn_y;
+
+			group = EC_KEY_get0_group(ec_key);
 
 			BN_init(&bn_key);
 			BN_init(&bn_x);
 			BN_init(&bn_y);
-			ec_key = EC_KEY_new_by_curve_name(NID_secp256k1);
-			group = EC_KEY_get0_group(ec_key);
-			ec_pub_key = EC_POINT_new(group);
 
-			BN_bin2bn(output_key, key_byte_length, &bn_key);
-			EC_KEY_set_private_key(ec_key, &bn_key);
-
-			if (!EC_POINT_mul(group, ec_pub_key, &bn_key, NULL, NULL, NULL)) {
-				fprintf(stderr,"Error at EC_POINT_mul.\n");
-				ret = EXIT_FAILURE;
-				goto bail;
-			}
+			ec_pub_key = EC_KEY_get0_public_key(ec_key);
 
 			EC_POINT_get_affine_coordinates_GFp(group, ec_pub_key, &bn_x, &bn_y, NULL);
 
@@ -653,6 +626,77 @@ main(int argc, char * argv[])
 
 			key_byte_length +=4;
 		}
+		switch (output_format) {
+		case OUTPUT_UNSPECIFIED:
+			output_format = OUTPUT_B58;
+			break;
+		default:
+			break;
+		}
+		pkey = EVP_PKEY_new();
+		EVP_PKEY_set1_EC_KEY(pkey, ec_key);
+	}
+
+	if (secret_type == TYPE_RSA) {
+		if(debug_mode)RSA_print_fp(stderr, rsa, 0);
+		switch (output_format) {
+		case OUTPUT_RAW:
+		case OUTPUT_DER:
+			if (outputPrivateKey) {
+				i2d_RSAPrivateKey_fp(stdout,rsa);
+			} else {
+				i2d_RSAPublicKey_fp(stdout,rsa);
+			}
+			goto bail;
+			break;
+		case OUTPUT_B64:
+		case OUTPUT_UNSPECIFIED:
+			output_format = OUTPUT_PEM_RSA;
+			break;
+		default:
+			break;
+		}
+		pkey = EVP_PKEY_new();
+		EVP_PKEY_set1_RSA(pkey, rsa);
+
+		// TODO: Output just the mod?
+		key_byte_length = 0;
+	}
+
+	if (secret_type == TYPE_EC) {
+		switch (output_format) {
+		case OUTPUT_DER:
+			if (outputPrivateKey) {
+				i2d_ECPrivateKey_fp(stdout, ec_key);
+			} else {
+				i2d_EC_PUBKEY_fp(stdout, ec_key);
+			}
+			goto bail;
+			break;
+		case OUTPUT_UNSPECIFIED:
+			output_format = OUTPUT_PEM;
+			break;
+		default:
+			break;
+		}
+
+		if (outputPrivateKey) {
+			const BIGNUM* ec_private_key;
+			ec_private_key = EC_KEY_get0_private_key(ec_key);
+			assert(output_key != NULL);
+			assert(key_byte_length >= BN_num_bytes(ec_private_key));
+			BN_bn2bin(ec_private_key, output_key);
+			key_byte_length = BN_num_bytes(ec_private_key);
+		} else {
+			// TODO: Output single point public key?
+			key_byte_length = 0;
+		}
+
+		pkey = EVP_PKEY_new();
+		EVP_PKEY_set1_EC_KEY(pkey, ec_key);
+	}
+
+	{
 		switch (output_format) {
 		case OUTPUT_DEC:
 			{
@@ -721,6 +765,48 @@ main(int argc, char * argv[])
 				}
 			}
 			break;
+		case OUTPUT_PEM:
+			if (pkey != NULL) {
+				if (outputPrivateKey) {
+					PEM_write_PrivateKey(
+						stdout,
+						pkey,
+						NULL,
+						NULL, 0, NULL, NULL
+					);
+				} else {
+					PEM_write_PUBKEY(
+						stdout,
+						pkey
+					);
+				}
+			} else {
+				fprintf(stderr, "Bad output format\n");
+				ret = EXIT_FAILURE;
+				goto bail;
+			}
+			break;
+		case OUTPUT_PEM_RSA:
+			if (rsa != NULL) {
+				if (outputPrivateKey) {
+					PEM_write_RSAPrivateKey(
+						stdout,
+						rsa,
+						NULL,
+						NULL, 0, NULL, NULL
+					);
+				} else {
+					PEM_write_RSAPublicKey(
+						stdout,
+						rsa
+					);
+				}
+			} else {
+				fprintf(stderr, "Bad output format\n");
+				ret = EXIT_FAILURE;
+				goto bail;
+			}
+			break;
 		case OUTPUT_UNSPECIFIED:
 		default:
 			fprintf(stderr, "Unknown output format\n");
@@ -731,6 +817,8 @@ main(int argc, char * argv[])
 	}
 
 bail:
+	EVP_PKEY_free(pkey);
+
 	if (output_key != NULL) {
 		memset(output_key, 0, key_byte_length);
 		free(output_key);
