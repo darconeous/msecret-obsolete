@@ -20,25 +20,20 @@ void LKDF_SHA256_CalcKeySelector(
 	const uint8_t *salt, size_t salt_size,
 	const uint8_t *info, size_t info_size
 ) {
-	int n;
+	 /*
+	  * LKDF_CalcKeySelector(salt, info) -> selector
+	  * LKDF_CalcKeySelector(salt, info) = HMAC_Hash(salt, info)
+	  */
 	HMAC_SHA256_CTX hmac;
 
 	HMAC_SHA256_Init(&hmac);
-
-	// Zero-fill the most-significant (left-most) bits for the salt.
-	for( n = 0; n < (HMAC_SHA256_DIGEST_LENGTH - salt_size) ; n++) {
-		static const uint8_t zero = 0;
-		HMAC_SHA256_UpdateKey(&hmac, &zero, 1);
-	}
-
 	HMAC_SHA256_UpdateKey(&hmac, salt, salt_size);
-
 	HMAC_SHA256_EndKey(&hmac);
 	HMAC_SHA256_StartMessage(&hmac);
 	HMAC_SHA256_UpdateMessage(&hmac, info, info_size);
-
-	// Selector is now in `key_out`.
 	HMAC_SHA256_EndMessage(key_out, &hmac);
+
+	HMAC_SHA256_Done(&hmac);
 }
 
 void LKDF_SHA256_Extract(
@@ -46,8 +41,17 @@ void LKDF_SHA256_Extract(
 	const LKDF_SHA256_KeySelector keySelector,
 	const uint8_t *ikm, size_t ikm_size
 ) {
+	/* If the IKM size is less than HMAC_DigestLength, then:
+	 *
+	 *     LKDF_Extract(selector, IKM, L) =
+	 *             HKDF_Expand(HKDF_Extract(selector, IKM), "", L)
+	 *
+	 * If the IKM size is greater than HMAC_DigestLength, then
+	 * things are much more complicated.
+	 */
+
 	uint8_t buf[HMAC_SHA256_DIGEST_LENGTH];
-	uint32_t n;
+	uint32_t n = 0;
 	HMAC_SHA256_CTX hmac;
 
 #ifdef LKDF_DEBUG
@@ -55,87 +59,122 @@ void LKDF_SHA256_Extract(
 	fprintf(stderr, "ikm_size: %d\n", (int)ikm_size);
 #endif
 
-	// --------------------------------------------------------
-	// Load the selector as the new key
+	if (ikm_size <= sizeof(buf)) {
+		// HKDF: Derive PRK
+		HMAC_SHA256_Init(&hmac);
+		HMAC_SHA256_UpdateKey(&hmac, keySelector, sizeof(buf));
+		HMAC_SHA256_EndKey(&hmac);
+		HMAC_SHA256_StartMessage(&hmac);
+		HMAC_SHA256_UpdateMessage(&hmac, ikm, ikm_size);
+		HMAC_SHA256_EndMessage(buf, &hmac);
 
-	HMAC_SHA256_Init(&hmac);
-	HMAC_SHA256_UpdateKey(&hmac, keySelector, HMAC_SHA256_DIGEST_LENGTH);
-	HMAC_SHA256_EndKey(&hmac);
+		// HKDF: Load PRK
+		HMAC_SHA256_Init(&hmac);
+		HMAC_SHA256_UpdateKey(&hmac, buf, sizeof(buf));
+		HMAC_SHA256_EndKey(&hmac);
 
-	// --------------------------------------------------------
-	// Output key generation loop
-
-	for (n = 1 ; key_size != 0 ; n++) {
-		int i, output_block_size;
-		int ikm_left, ikm_n;
-		const uint8_t* ikm_idx;
-
-		// Integer values must be in big-endian when included in hash.
-		const uint32_t be_n = htonl(n);
-
-		if (key_size > HMAC_SHA256_DIGEST_LENGTH) {
-			output_block_size = HMAC_SHA256_DIGEST_LENGTH;
-		} else {
-			output_block_size = key_size;
-		}
-
-		// Initialize the output to all zeros.
-		memset(key_out, 0, output_block_size);
-
-		// Interate through each block of the IKM.
-		for (	ikm_idx = ikm,
-				ikm_left = ikm_size,
-				ikm_n = 0
-			;	(ikm_left > 0) || (ikm_n == 0)
-			;	ikm_left -= HMAC_SHA256_DIGEST_LENGTH,
-				ikm_idx += HMAC_SHA256_DIGEST_LENGTH,
-				ikm_n++
-		) {
-			// Integer values must be in big-endian when included in hash.
-			const uint32_t be_ikm_n = htonl(ikm_n);
-
+		// HKDF: Loop until key output is filled.
+		do {
+			n++;
+			uint8_t c = (uint8_t)n;
 			HMAC_SHA256_StartMessage(&hmac);
-
-			// Output feedback from previous output key block
-			HMAC_SHA256_UpdateMessage(
-				&hmac,
-				key_out - HMAC_SHA256_DIGEST_LENGTH,
-				(n > 1)
-					? sizeof(buf)
-					: 0
-			);
-
-			// IKM block counter (Big-endian)
-			HMAC_SHA256_UpdateMessage(
-				&hmac,
-				(uint8_t*)&be_ikm_n,
-				sizeof(be_ikm_n)
-			);
-
-			// Data from IKM block
-			HMAC_SHA256_UpdateMessage(
-				&hmac,
-				ikm_idx,
-				(ikm_left > HMAC_SHA256_DIGEST_LENGTH)
-					? HMAC_SHA256_DIGEST_LENGTH
-					: ikm_left
-			);
-
-			// Output key block index (Big-endian)
-			HMAC_SHA256_UpdateMessage(
-				&hmac,
-				(uint8_t*)&be_n,
-				sizeof(be_n)
-			);
-
+			if (n != 1) {
+				HMAC_SHA256_UpdateMessage(&hmac, buf, sizeof(buf));
+			}
+			HMAC_SHA256_UpdateMessage(&hmac, &c, 1);
 			HMAC_SHA256_EndMessage(buf, &hmac);
 
-			// XOR the results for each block into the output.
-			xorcpy(key_out, buf, output_block_size);
-		}
+			if (key_size >= sizeof(buf)) {
+				memcpy(key_out, buf, sizeof(buf));
+				key_out += sizeof(buf);
+				key_size -= sizeof(buf);
+			} else {
+				memcpy(key_out, buf, key_size);
+				key_size = 0;
+			}
+		} while(key_size > 0);
 
-		key_size -= output_block_size;
-		key_out += output_block_size;
+	} else {
+
+		// --------------------------------------------------------
+		// Load the selector as the new key
+
+		HMAC_SHA256_Init(&hmac);
+		HMAC_SHA256_UpdateKey(&hmac, keySelector, HMAC_SHA256_DIGEST_LENGTH);
+		HMAC_SHA256_EndKey(&hmac);
+
+		// --------------------------------------------------------
+		// Output key generation loop
+
+		for (n = 1 ; key_size != 0 ; n++) {
+			int output_block_size;
+			int ikm_left, ikm_n;
+			const uint8_t* ikm_idx;
+			const uint8_t cn = (uint8_t)n;
+
+			if (key_size > sizeof(buf)) {
+				output_block_size = sizeof(buf);
+			} else {
+				output_block_size = key_size;
+			}
+
+			// Initialize the output to all zeros.
+			memset(key_out, 0, output_block_size);
+
+			// Interate through each block of the IKM.
+			for (	ikm_idx = ikm,
+					ikm_left = ikm_size,
+					ikm_n = 1
+				;	(ikm_left > 0) || (ikm_n == 1)
+				;	ikm_left -= sizeof(buf),
+					ikm_idx += sizeof(buf),
+					ikm_n++
+			) {
+				const uint8_t ikm_cn = (uint8_t)ikm_n;
+
+				HMAC_SHA256_StartMessage(&hmac);
+
+				// Output feedback from previous output key block
+				HMAC_SHA256_UpdateMessage(
+					&hmac,
+					key_out - sizeof(buf),
+					(n > 1)
+						? sizeof(buf)
+						: 0
+				);
+
+				// Output key block index
+				HMAC_SHA256_UpdateMessage(
+					&hmac,
+					&cn,
+					1
+				);
+
+				// Data from IKM block
+				HMAC_SHA256_UpdateMessage(
+					&hmac,
+					ikm_idx,
+					(ikm_left > sizeof(buf))
+						? sizeof(buf)
+						: ikm_left
+				);
+
+				// IKM block counter
+				HMAC_SHA256_UpdateMessage(
+					&hmac,
+					&ikm_cn,
+					1
+				);
+
+				HMAC_SHA256_EndMessage(buf, &hmac);
+
+				// XOR the results for each block into the output.
+				xorcpy(key_out, buf, output_block_size);
+			}
+
+			key_size -= output_block_size;
+			key_out += output_block_size;
+		}
 	}
 
 	memset(buf, 0, sizeof(buf));

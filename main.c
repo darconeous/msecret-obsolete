@@ -254,6 +254,32 @@ main(int argc, char * argv[])
 		}
 		key_byte_length = 128; // Just set this to be big for now.
 	}
+	HANDLE_LONG_ARGUMENT("list-curves")
+	{
+		int i;
+		/* Here we are just stupidly looping through every single
+		 * NID value and seeing if we can successfully use
+		 * EC_KEY_new_by_curve_name() on it. If we can, we get the
+		 * short name and print it out. Kinda stupid, but a lot
+		 * shorter than a "real" version.
+		 */
+		for (i = 1; i < 10000; i++) {
+			ec_key = EC_KEY_new_by_curve_name(i);
+			if (ec_key != NULL) {
+				const char* sn = OBJ_nid2sn(i);
+				const char* ln = OBJ_nid2ln(i);
+				if (strcmp(sn, ln) == 0) {
+					printf("%d\t%s\n", i, sn);
+				} else {
+					printf("%d\t%s\t%s\n", i, sn, ln);
+				}
+				EC_KEY_free(ec_key);
+				ec_key = NULL;
+			}
+		}
+		ret = EXIT_SUCCESS;
+		goto bail;
+	}
 	HANDLE_LONG_ARGUMENT("rsa")
 	{
 		secret_type = TYPE_RSA;
@@ -401,12 +427,6 @@ main(int argc, char * argv[])
 	}
 	END_ARGUMENTS
 
-
-	if (key_byte_length == -1) {
-		// Default key length is 128 bit (16 bytes).
-		key_byte_length = 16;
-	}
-
 	if (master_secret_filename == NULL) {
 		fprintf(stderr, "Filename of master secret not specified.\n");
 		ret = EXIT_FAILURE;
@@ -454,6 +474,11 @@ main(int argc, char * argv[])
 			}
 			master_secret = new_block;
 		}
+	}
+
+	if (key_byte_length == -1) {
+		// Default key length is the same length of the master secret.
+		key_byte_length = master_secret_len;
 	}
 
 	if (output_key_filename != NULL) {

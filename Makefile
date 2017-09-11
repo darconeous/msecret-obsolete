@@ -4,8 +4,8 @@ CFLAGS = -g -O0 -Wno-deprecated-declarations
 
 LDFLAGS = -lcrypto
 
-#OPENSSL_PATH = /usr
-OPENSSL_PATH = $(HOME)/homebrew/opt/openssl
+OPENSSL_PATH = /usr
+#OPENSSL_PATH = $(HOME)/homebrew/opt/openssl
 
 CFLAGS += -I$(OPENSSL_PATH)/include
 LDFLAGS += -L$(OPENSSL_PATH)/lib
