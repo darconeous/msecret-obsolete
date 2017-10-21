@@ -76,10 +76,10 @@ static arg_list_item_t option_list[] = {
 	{ 0, "prime",	NULL, "Derive a large prime"				},
 	{ 0, "ec", "curve-name", "Derive a EC private key"				},
 	{ 0, "rsa",	NULL, "Derive a RSA key"				},
-	{ 0, "private",	NULL, "Output private key"				},
-	{ 0, "bitcoin-priv",	NULL, "Derive a bitcoin private key"				},
-	{ 0, "bitcoin-addr",	NULL, "Derive the associated bitcoin address"				},
+	{ 0, "bitcoin",	NULL, "Derive a bitcoin address"				},
 	{ 0, "list-curves", NULL, "Print out list of supported curves"				},
+	{ 0, "private",	NULL, "Output private key"				},
+	{ 0, "public",	NULL, "Output public key (default)"				},
 	{ 0 }
 };
 
@@ -110,7 +110,6 @@ main(int argc, char * argv[])
 		TYPE_DSA_PARAM,
 		TYPE_BITCOIN,
 	} secret_type;
-	bool gen_prime=false;
 
 	enum {
 		OUTPUT_UNSPECIFIED,
@@ -207,6 +206,10 @@ main(int argc, char * argv[])
 	HANDLE_LONG_ARGUMENT("private")
 	{
 		outputPrivateKey = true;
+	}
+	HANDLE_LONG_ARGUMENT("public")
+	{
+		outputPrivateKey = false;
 	}
 	HANDLE_LONG_ARGUMENT("bitcoin")
 	{
@@ -668,9 +671,9 @@ main(int argc, char * argv[])
 		case OUTPUT_RAW:
 		case OUTPUT_DER:
 			if (outputPrivateKey) {
-				i2d_RSAPrivateKey_fp(stdout,rsa);
+				i2d_RSAPrivateKey_fp(output_key_file,rsa);
 			} else {
-				i2d_RSAPublicKey_fp(stdout,rsa);
+				i2d_RSAPublicKey_fp(output_key_file,rsa);
 			}
 			goto bail;
 			break;
@@ -692,9 +695,9 @@ main(int argc, char * argv[])
 		switch (output_format) {
 		case OUTPUT_DER:
 			if (outputPrivateKey) {
-				i2d_ECPrivateKey_fp(stdout, ec_key);
+				i2d_ECPrivateKey_fp(output_key_file, ec_key);
 			} else {
-				i2d_EC_PUBKEY_fp(stdout, ec_key);
+				i2d_EC_PUBKEY_fp(output_key_file, ec_key);
 			}
 			goto bail;
 			break;
@@ -736,7 +739,7 @@ main(int argc, char * argv[])
 						ret = EXIT_FAILURE;
 						goto bail;
 					}
-					fprintf(stdout, format_string, v);
+					fprintf(output_key_file, format_string, v);
 					free(format_string);
 
 #if 0
@@ -744,7 +747,7 @@ main(int argc, char * argv[])
 					uint64_t v = 0;
 					memcpy(((uint8_t*)&v)+8-key_byte_length, output_key, key_byte_length);
 					v = htonll(v);
-					fprintf(stdout, "%llu\n", v);
+					fprintf(output_key_file, "%llu\n", v);
 #endif
 				} else {
 					fprintf(stderr, "Key size too large for decimal mode\n");
@@ -753,15 +756,15 @@ main(int argc, char * argv[])
 			}
 			break;
 		case OUTPUT_HEX:
-			hex_dump(stdout, output_key, key_byte_length, "");
-			fprintf(stdout, "\n");
+			hex_dump(output_key_file, output_key, key_byte_length, "");
+			fprintf(output_key_file, "\n");
 			break;
 		case OUTPUT_B58:
 			{
 				char output_string[key_byte_length*5];
 				output_string[0] = 0;
 
-				fprintf(stdout, "%s\n", encode_base58(output_string, sizeof(output_string), output_key, key_byte_length));
+				fprintf(output_key_file, "%s\n", encode_base58(output_string, sizeof(output_string), output_key, key_byte_length));
 			}
 			break;
 		case OUTPUT_B32:
@@ -770,7 +773,7 @@ main(int argc, char * argv[])
 				output_string[0] = 0;
 
 				base32_encode(output_key, key_byte_length, (unsigned char*)output_string);
-				fprintf(stdout, "%s\n", output_string);
+				fprintf(output_key_file, "%s\n", output_string);
 			}
 			break;
 		case OUTPUT_B64:
@@ -781,7 +784,7 @@ main(int argc, char * argv[])
 		case OUTPUT_RAW:
 			{
 				int written;
-				written = fwrite(output_key,key_byte_length,1,output_key_file);
+				written = fwrite(output_key,1,key_byte_length,output_key_file);
 				if (written < 0) {
 					fprintf(stderr, "Write failure: %d %s\n", errno, strerror(errno));
 					ret = EXIT_FAILURE;
@@ -794,14 +797,14 @@ main(int argc, char * argv[])
 			if (pkey != NULL) {
 				if (outputPrivateKey) {
 					PEM_write_PrivateKey(
-						stdout,
+						output_key_file,
 						pkey,
 						NULL,
 						NULL, 0, NULL, NULL
 					);
 				} else {
 					PEM_write_PUBKEY(
-						stdout,
+						output_key_file,
 						pkey
 					);
 				}
@@ -815,14 +818,14 @@ main(int argc, char * argv[])
 			if (rsa != NULL) {
 				if (outputPrivateKey) {
 					PEM_write_RSAPrivateKey(
-						stdout,
+						output_key_file,
 						rsa,
 						NULL,
 						NULL, 0, NULL, NULL
 					);
 				} else {
 					PEM_write_RSAPublicKey(
-						stdout,
+						output_key_file,
 						rsa
 					);
 				}

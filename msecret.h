@@ -45,7 +45,7 @@ void MSECRET_Extract_Integer_BN(
 	const uint8_t *ikm, size_t ikm_size
 );
 
-void MSECRET_Extract_Prime_BN(
+int MSECRET_Extract_Prime_BN(
 	BIGNUM *prime,
 	int bit_length,
 	int flags,
@@ -53,7 +53,7 @@ void MSECRET_Extract_Prime_BN(
 	const uint8_t *ikm, size_t ikm_size
 );
 
-void MSECRET_Extract_RSA(
+int MSECRET_Extract_RSA(
 	RSA *rsa,
 	int mod_length,
 	int flags,

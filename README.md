@@ -49,7 +49,7 @@ The following commands will generate a master secret in the file
 `secret.bin` with a size of 512 bits (64 bytes):
 
     # Create master.bin with the appropriate length.
-    dd if=/dev/zero of=secret.bin bs=1 c=64
+    dd if=/dev/zero of=secret.bin bs=1 count=64
 
     # Use dmesg for initial entropy.
     dmesg | ./ecollect secret.bin
@@ -110,70 +110,3 @@ determination about the value of the secret.
 
 [libgfshare]: http://www.digital-scurf.org/software/libgfshare
 
-## Large Key Derivation Function (LKDF) ##
-
-Most key derivation functions (KDFs) are not suitable for use with
-large amounts of input keying material. HKDF, for example, creates a
-entropy bottle-neck of the hash length between the "extract" and
-"expand" stage. PBKDF2 isn't really suitable, either, as it was
-designed for a different purpose: key streching.
-
-For example, using HKDF with HMAC-SHA1 to generate a 521-bit ECC key
-is not appropriate since the input keying material is compressed into
-just 160 bits, even if the input keying material is much larger than
-521 bits.
-
-There are a few ways around this. The most obvious method is to use a
-hash with a larger output size, like LKDF-SHA512. However, this still
-imposes a (much larger) entropy bottleneck when the IKM is larger than
-512 bits. More importantly, many smart-cards don't implement SHA512 in
-hardware, making the operation prohibitively expensive.
-
-Another alternative is to break up the IKM into `hlen` sized blocks
-and apply the KDF multiple times, XORing the results into the final
-key. This works, but it is somewhat inefficient. If we are going to go
-down this road, we might as well design something that is more
-efficient.
-
-As such, I am proposing a new key derivation function specifically
-designed for deriving keys when the IKM is larger than `hlen`: the
-Large Key Derivation Function, or LKDF.
-
-When the IKM is smaller than the hash length, LKDF is defined to in
-terms of HKDF, according to the following:
-
-     LKDF_Extract(salt, IKM, L) =
-             HKDF_Expand(HKDF_Extract(salt, IKM), "", L)
-
-When the IKM is larger than the hash length, an entirely different
-mechanism is used.
-
-This key derivation function has the following parameters:
-
-*   `IKM` - Input keying material. Arbitrary length.
-*   `Salt` - Salt/Nonce. Arbitrary length.
-*   `HMAC` - The HMAC algorithm.
-
-The output key material (OKM) is calculated as follows:
-
-    N = ceil(L/HashLen)
-    T = T(1) | T(2) | T(3) | ... | T(N)
-    OKM = first L octets of T
-
-where:
-
-    T(0) = empty string (zero length)
-    T(1) = BlockCalc(1, T(0), salt, IKM)
-    T(2) = BlockCalc(2, T(1), salt, IKM)
-    T(3) = BlockCalc(3, T(2), salt, IKM)
-    ...
-    T(n) = BlockCalc(n, T(n-1), salt, IKM)
-
-    BlockCalc(n, prev, salt, IKM)
-            = HMAC(salt, prev | n | IKM_Chunk(0) | 0x01)
-            ^ HMAC(salt, prev | n | IKM_Chunk(1) | 0x02)
-            ^ HMAC(salt, prev | n | IKM_Chunk(2) | 0x03)
-            ...
-            ^ HMAC(salt, prev | n | IKM_Chunk(m-1) | m)
-
-    m = RoundUp(IKM_Length/HashLen);

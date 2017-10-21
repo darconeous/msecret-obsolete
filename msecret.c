@@ -8,6 +8,9 @@
 #include <string.h>
 #include <stdio.h>
 
+#define kMSECRET_OK        0
+#define kMSECRET_FAILED    1
+
 static uint8_t
 enclosing_mask_uint8(uint8_t x) {
 	x |= (x >> 1);
@@ -110,7 +113,7 @@ MSECRET_Extract_Integer_BN(
 	BN_bin2bn(val_bytes, size, val);
 }
 
-void
+int
 MSECRET_Extract_Prime_BN(
 	BIGNUM *prime,
 	int bit_length,
@@ -123,25 +126,23 @@ MSECRET_Extract_Prime_BN(
 		| MSECRET_PRIME_LEELIM
 #endif
 		| MSECRET_PRIME_STD_EXPONENT;
-
+	int ret = kMSECRET_FAILED;
 	MSECRET_KeySelector new_key_selector;
 	HMAC_SHA256_CTX hmac;
-	BIGNUM *max = BN_new();
-	BIGNUM *e = NULL;
 	BN_CTX *ctx = BN_CTX_new();
-	BIGNUM *r0 = BN_new();
-	BIGNUM *r1 = BN_new();
+	BIGNUM *max = BN_CTX_get(ctx);
+	BIGNUM *e = NULL;
+	BIGNUM *r0 = NULL;
+	BIGNUM *r1 = NULL;
 
 	if (bit_length <= 0) {
 		fprintf(stderr,"MSECRET_Extract_Prime_BN: Invalid bit length (%d)\n", bit_length);
-		// TODO: Change this to return an error at some point.
-		abort();
+		goto bail;
 	}
 
 	if ((flags & ~kSupportedFlags) != 0) {
 		fprintf(stderr,"MSECRET_Extract_Prime_BN: Unexpected flags\n");
-		// TODO: Change this to return an error at some point.
-		abort();
+		goto bail;
 	}
 
 	HMAC_SHA256_Init(&hmac);
@@ -151,7 +152,9 @@ MSECRET_Extract_Prime_BN(
 	HMAC_SHA256_UpdateMessage(&hmac, (const uint8_t*)"Prime:", 6);
 
 	if (flags & MSECRET_PRIME_STD_EXPONENT) {
-		e = BN_new();
+		e = BN_CTX_get(ctx);
+		r0 = BN_CTX_get(ctx);
+		r1 = BN_CTX_get(ctx);
 		BN_set_word(e, RSA_F4);
 		HMAC_SHA256_UpdateMessage(&hmac, (const uint8_t*)"GCD65537=0:", 11);
 	}
@@ -164,9 +167,11 @@ MSECRET_Extract_Prime_BN(
 
 	HMAC_SHA256_EndMessage(new_key_selector, &hmac);
 
+	// Set our target strength.
 	BN_set_bit(max, bit_length);
 	BN_sub_word(max, 1);
 
+	// Calculate our starting point.
 	MSECRET_Extract_Integer_BN(
 		prime,
 		max,
@@ -174,10 +179,13 @@ MSECRET_Extract_Prime_BN(
 		ikm, ikm_size
 	);
 
+	// Make sure our starting point is odd and has
+	// the first two bits set (ensuring it is large).
 	BN_set_bit(prime, 0);
 	BN_set_bit(prime, bit_length-1);
 	BN_set_bit(prime, bit_length-2);
 
+	// Start looping through candidates.
 	for(;true;BN_add_word(prime, 2)) {
 		if (!BN_is_prime(prime, BN_prime_checks, NULL, ctx, NULL)) {
 			continue;
@@ -186,7 +194,7 @@ MSECRET_Extract_Prime_BN(
 #if MSECRET_PRIME_LEELIM
         if (flags & MSECRET_PRIME_LEELIM) {
 			// TODO: Check that the prime is a "Lee/Lim" prime.
-			abort();
+			goto bail;
 		}
 #endif
 
@@ -194,7 +202,6 @@ MSECRET_Extract_Prime_BN(
 			BN_sub(r0, prime, BN_value_one());
 			BN_gcd(r1, r0, e, ctx);
 			if (!BN_is_one(r1)) {
-				// TODO: Calculate how often this really happens...
 				fprintf(stderr,"Note: Skipped prime where (p-1) was divisible by 65537\n");
 				continue;
 			}
@@ -203,13 +210,12 @@ MSECRET_Extract_Prime_BN(
 		break;
 	}
 
-	if (e) {
-		BN_free(e);
-	}
-	BN_free(r0);
-	BN_free(r1);
-	BN_free(max);
+	ret = kMSECRET_OK;
+bail:
+
 	BN_CTX_free(ctx);
+
+	return ret;
 }
 
 #if 0
@@ -320,7 +326,7 @@ MSECRET_Extract_RSA_X931(
 #endif
 
 
-void
+int
 MSECRET_Extract_RSA(
 	RSA *rsa,
 	int mod_length,
@@ -329,23 +335,20 @@ MSECRET_Extract_RSA(
 	const uint8_t *ikm, size_t ikm_size
 ) {
 	static const int kSupportedFlags = 0;
+	int ret = kMSECRET_FAILED;
 	// TODO: Review http://www.opensource.apple.com/source/OpenSSL097/OpenSSL097-16/openssl/crypto/rsa/rsa_gen.c
-	uint32_t mod_length_be = htonl(mod_length);
 	MSECRET_KeySelector prime_key_selector;
 	int bitsp, bitsq;
-	HMAC_SHA256_CTX hmac;
 	BN_CTX *ctx = BN_CTX_new();
 
 	if ((flags & ~kSupportedFlags) != 0) {
 		fprintf(stderr,"MSECRET_Extract_RSA: Unexpected flags\n");
-		// TODO: Change this to return an error at some point.
-		abort();
+		goto bail;
 	}
 
 	if (mod_length <= 0) {
 		fprintf(stderr,"MSECRET_Extract_RSA: Invalid mod length (%d)\n", mod_length);
-		// TODO: Change this to return an error at some point.
-		abort();
+		goto bail;
 	}
 
 	bitsp = (mod_length + 1) / 2;
@@ -370,7 +373,7 @@ MSECRET_Extract_RSA(
 		"RSA:a", 5
 	);
 
-	MSECRET_Extract_Prime_BN(
+	ret = MSECRET_Extract_Prime_BN(
 		rsa->p,
 		bitsp,
 		flags | MSECRET_PRIME_STD_EXPONENT,
@@ -378,19 +381,27 @@ MSECRET_Extract_RSA(
 		ikm, ikm_size
 	);
 
+	if (ret != kMSECRET_OK) {
+		goto bail;
+	}
+
 	MSECRET_CalcKeySelector(
 		prime_key_selector,
 		key_selector, sizeof(MSECRET_KeySelector),
 		"RSA:b", 5
 	);
 
-	MSECRET_Extract_Prime_BN(
+	ret = MSECRET_Extract_Prime_BN(
 		rsa->q,
 		bitsq,
 		flags | MSECRET_PRIME_STD_EXPONENT,
 		prime_key_selector,
 		ikm, ikm_size
 	);
+
+	if (ret != kMSECRET_OK) {
+		goto bail;
+	}
 
 	assert(BN_cmp(rsa->p, rsa->q) != 0);
 
@@ -417,7 +428,6 @@ MSECRET_Extract_RSA(
 	BIGNUM *r0 = BN_CTX_get(ctx);
 	BIGNUM *r1 = BN_CTX_get(ctx);
 	BIGNUM *r2 = BN_CTX_get(ctx);
-	BIGNUM *r3 = BN_CTX_get(ctx);
 
 	if (rsa->n == NULL) {
 		rsa->n = BN_new();
@@ -458,7 +468,11 @@ MSECRET_Extract_RSA(
 
 #endif
 
+	ret = kMSECRET_OK;
+
+bail:
 	BN_CTX_free(ctx);
+	return ret;
 }
 
 void MSECRET_Extract_EC_KEY(

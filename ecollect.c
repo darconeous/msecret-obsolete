@@ -1,100 +1,51 @@
+/**
+ * Entropy Collection Tool
+ *
+ * Copyright (C) 2017 Robert Quattlebaum, All Rights Reserved.
+ *
+ * # Abstract #
+ *
+ * This tool collects entropy from an input stream into a fixed-length
+ * file that can later be used directly as keying material. It allows you
+ * to cherry-pick the entropy sources you use for key generation rather
+ * than relying on operating system methods. Its results are reproducable
+ * given the same input. The tool may be invoked multiple times to pull
+ * entropy from multiple different sources. You may also pull entropy
+ * from device files like `/dev/urandom`, pressing CTRL-C once you feel
+ * you have collected enough entropy.
+ *
+ * # Usage #
+ *
+ * You must start with a file that is the size you want your keying
+ * material to be. This is easily accomplished using `dd`:
+ *
+ *     dd if=/dev/zero of=secret.bin bs=1 count=64
+ *
+ * You can then use ecollect to gather up entropy into that file:
+ *
+ *     # Collect entropy from microphone. (Press CTRL-C to stop)
+ *     arecord | ./ecollect secret.bin
+ *
+ *     # Collect entropy from /dev/urandom. (Press CTRL-C to stop)
+ *     ./ecollect secret.bin /dev/urandom
+ *
+ * # More Information #
+ *
+ * See README.md for more information.
+ *
+ */
 
-#include "hmac_sha/sha2.h"
-#include <arpa/inet.h>
-#include <string.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <fcntl.h>
+#include <string.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
-static void *
-xorcpy(void *restrict dst, const void *restrict src, size_t n)
-{
-	uint8_t* idx = (uint8_t*)dst;
-	for (; n != 0 ; n--) {
-		*idx++ ^= *(const uint8_t*)src++;
-	}
-	return dst;
-}
+#include "hmac_sha/sha2.h"
+#include "hmac_sha/hmac_sha256.h"
 
-static void
-add_entropy(uint8_t* pool, int pool_len, const uint8_t* entropy, int entropy_len)
-{
-	int i;
-	SHA256_CTX hash;
-	uint8_t hashval[SHA256_DIGEST_LENGTH];
-
-	while (entropy_len > pool_len) {
-		add_entropy(pool, pool_len, entropy, pool_len);
-		entropy += pool_len;
-		entropy_len -= pool_len;
-	}
-
-	if (entropy_len <= 0) {
-		// Nothing to do.
-		return;
-	}
-
-	// Step 1: XOR in the entropy, repeating if necessary.
-	for (i = 0; (entropy_len > 0) && (i <= (pool_len - 1) / entropy_len); i++) {
-		int offset = i * entropy_len;
-		int len = entropy_len;
-		if (offset + len > pool_len) {
-			len = pool_len - offset;
-		}
-		if (len < 0) {
-			break;
-		}
-		xorcpy(pool + offset, entropy, len);
-	}
-
-	// Step 2: Mix it up.
-	if (pool_len < SHA256_DIGEST_LENGTH) {
-		SHA256_Init(&hash);
-		SHA256_Update(&hash, pool, pool_len);
-		SHA256_Final(hashval, &hash);
-		memcpy(pool, hashval, pool_len);
-	} else {
-		SHA256_Init(&hash);
-		SHA256_Update(&hash, pool + pool_len - SHA256_DIGEST_LENGTH, SHA256_DIGEST_LENGTH);
-		SHA256_Update(&hash, pool, SHA256_DIGEST_LENGTH);
-		SHA256_Final(hashval, &hash);
-		memcpy(pool, hashval, SHA256_DIGEST_LENGTH);
-
-		for (i = 0; i < pool_len / SHA256_DIGEST_LENGTH; i++) {
-			int offset = i * SHA256_DIGEST_LENGTH;
-			int len = SHA256_DIGEST_LENGTH * 2;
-
-			if (offset + len > pool_len) {
-				len = pool_len - offset;
-			}
-
-			if (len < SHA256_DIGEST_LENGTH) {
-				break;
-			}
-
-			SHA256_Init(&hash);
-			SHA256_Update(&hash, pool + offset, len);
-			SHA256_Final(hashval, &hash);
-			memcpy(pool + offset + SHA256_DIGEST_LENGTH, hashval, len - SHA256_DIGEST_LENGTH);
-		}
-	}
-
-	// Step 3: XOR in the entropy again, repeating if necessary.
-	// This helps frustrate active attacks.
-	for (i = 0; (entropy_len > 0) && (i <= (pool_len-1)/entropy_len); i++) {
-		int offset = i * entropy_len;
-		int len = entropy_len;
-		if (offset + len > pool_len) {
-			len = pool_len - offset;
-		}
-		if (len < 0) {
-			break;
-		}
-		xorcpy(pool + offset, entropy, len);
-	}
-}
+//#define DEBUG 1
 
 int
 hex_dump(FILE* file, const uint8_t *data, size_t data_len, const char* sep)
@@ -123,7 +74,120 @@ hex_dump(FILE* file, const uint8_t *data, size_t data_len, const char* sep)
 	return ret;
 }
 
+static void *
+xorcpy(void *restrict dst, const void *restrict src, size_t n)
+{
+	uint8_t* idx = (uint8_t*)dst;
+	for (; n != 0 ; n--) {
+		*idx++ ^= *(const uint8_t*)src++;
+	}
+	return dst;
+}
+
+static void
+mix_pool(uint8_t* pool, int pool_len)
+{
+	uint8_t hashval[SHA256_DIGEST_LENGTH];
+
+#if DEBUG
+	fprintf(stderr, "pool-in:  ");
+	hex_dump(stderr, pool, pool_len, "");
+	fprintf(stderr, "\n");
+#endif
+
+	if (pool_len <= SHA256_DIGEST_LENGTH) {
+		// Pool is small enough that we can just hash it once and be done with it.
+
+		SHA256_CTX hash;
+
+		SHA256_Init(&hash);
+		SHA256_Update(&hash, pool, pool_len);
+		SHA256_Final(hashval, &hash);
+
+		memcpy(pool, hashval, pool_len);
+
+	} else {
+		// Pool is larger than the digest length, so we need to use a
+		// slightly more complicated algorithm to mix up the pool.
+		// The idea is to break up the pool into `n` digest-length-sized
+		// blocks and calculate the HMAC-SHA256 of each one, using the
+		// previous pool as the key. We also chain the HMAC operations
+		// by prepending the previous HMAC result to the message(using
+		// digest of all zeros for the initial block). This preserves
+		// the total amount of entropy present in the system while
+		// ensuring that there are no correlations in output.
+
+		int i;
+		HMAC_SHA256_CTX hmac;
+
+		HMAC_SHA256_Init(&hmac);
+		HMAC_SHA256_UpdateKey(&hmac, pool, pool_len);
+		HMAC_SHA256_EndKey(&hmac);
+
+		memset(hashval, 0, sizeof(hashval));
+
+		for (i = 0; i < (pool_len + SHA256_DIGEST_LENGTH - 1) / SHA256_DIGEST_LENGTH; i++) {
+			int offset = i * SHA256_DIGEST_LENGTH;
+			int len = SHA256_DIGEST_LENGTH;
+
+			if (offset + len > pool_len) {
+				len = pool_len - offset;
+			}
+
+			HMAC_SHA256_StartMessage(&hmac);
+			HMAC_SHA256_UpdateMessage(&hmac, hashval, sizeof(hashval));
+			HMAC_SHA256_UpdateMessage(&hmac, pool + offset, len);
+			HMAC_SHA256_EndMessage(hashval, &hmac);
+
+			memcpy(pool + offset, hashval, len);
+		}
+	}
+
+#if DEBUG
+	fprintf(stderr, "pool-out: ");
+	hex_dump(stderr, pool, pool_len, "");
+	fprintf(stderr, "\n");
+#endif
+}
+
+static void
+add_entropy(uint8_t* pool, int pool_len, const uint8_t* entropy, int entropy_len)
+{
+	// Break up entropy into pool-sized blocks.
+	// We should never execute the code in this loop
+	// because the only place where this method is called
+	// ensures that it is never called with an entropy_len
+	// that is larger than pool_len. Nonetheless, this code
+	// is being left in for robustness purposes.
+	while (entropy_len > pool_len) {
+		add_entropy(pool, pool_len, entropy, pool_len);
+		entropy += pool_len;
+		entropy_len -= pool_len;
+	}
+
+	// If there is no more entropy, we are done.
+	if (entropy_len <= 0) {
+		return;
+	}
+
+#if DEBUG
+	fprintf(stderr, "entropy:  ");
+	hex_dump(stderr, entropy, entropy_len, "");
+	fprintf(stderr, "\n");
+#endif
+
+	// Step 1: XOR in the entropy.
+	xorcpy(pool, entropy, entropy_len);
+
+	// Step 2: Mix up the pool.
+	mix_pool(pool, pool_len);
+
+	// Step 3: XOR in the entropy again. This helps frustrate active attacks.
+	xorcpy(pool, entropy, entropy_len);
+}
+
 static int gInterrupted;
+
 static void
 signal_handler(int sig)
 {
@@ -139,6 +203,8 @@ main(int argc, char * argv[])
 	uint8_t *epool = NULL;
 	int epool_size = 0;
 	size_t bytes_consumed = 0;
+	uint8_t *buffer;
+	int buffer_len = 0;
 
 	signal(SIGINT, &signal_handler);
 	signal(SIGTERM, &signal_handler);
@@ -171,29 +237,50 @@ main(int argc, char * argv[])
 		fprintf(stderr,"opened %s\n",argv[2]);
 	}
 
+	buffer = malloc(epool_size);
+
 	while (!feof(stdin) && !ferror(stdin) && !gInterrupted) {
-		uint8_t buffer[1024*20] = {};
-		int len;
-		len = fread(
-			buffer,
+		int len = fread(
+			buffer + buffer_len,
 			1,
-			epool_size > sizeof(buffer)
-				? sizeof(buffer)
-				: epool_size,
+			epool_size - buffer_len,
 			stdin
 		);
 
 		if (len < 0) {
 			perror("fread");
+
+			// Dump the rest of the buffer into the entropy pool.
+			add_entropy(epool, epool_size, buffer, buffer_len);
+			bytes_consumed += buffer_len;
+
 			exit(EXIT_FAILURE);
 		}
 
-		add_entropy(epool, epool_size, buffer, len);
-		bytes_consumed += len;
+		buffer_len += len;
+
+		if (buffer_len == epool_size) {
+			// Empty the buffer into the entropy pool.
+
+			add_entropy(epool, epool_size, buffer, buffer_len);
+			bytes_consumed += buffer_len;
+			buffer_len = 0;
+		}
 	}
 
+	// Dump the rest of the buffer into the entropy pool.
+	add_entropy(epool, epool_size, buffer, buffer_len);
+	bytes_consumed += buffer_len;
+
 	fprintf(stderr, "done. Consumed %lld bytes\n", (long long)bytes_consumed);
-//	hex_dump(stderr, epool, epool_size, "");
+
+#if DEBUG
+	hex_dump(stderr, epool, epool_size, "");
+#endif
+
 	fprintf(stderr, "\n");
+
+	free(buffer);
+
 	return EXIT_SUCCESS;
 }
