@@ -41,6 +41,8 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <stdint.h>
+#include <signal.h>
 
 #include "hmac_sha/sha2.h"
 #include "hmac_sha/hmac_sha256.h"

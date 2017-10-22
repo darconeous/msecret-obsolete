@@ -3,12 +3,14 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
-#include "msecret.h"
-#include "lkdf.h"
 #include "help.h"
 #include <sys/errno.h>
 #include <inttypes.h>
+
 #include "hmac_sha/sha2.h"
+
+#include <libmsecret/msecret.h>
+#include <libmsecret/lkdf.h>
 
 #define HEADER_SHA_H 1
 #define SHA_DIGEST_LENGTH (160/8)
@@ -16,8 +18,8 @@
 #include <openssl/x509.h>
 #include <openssl/pem.h>
 #include <openssl/ec.h>
-#include "base58.h"
-#include "base32.h"
+#include "base58/base58.h"
+#include "base32/base32.h"
 
 #define MASTER_SECRET_BLOCK_SIZE (1024*4)
 
