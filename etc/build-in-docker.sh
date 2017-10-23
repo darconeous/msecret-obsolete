@@ -21,7 +21,8 @@ DIR="`dirname $0`"
 
 "${DIR}"/run-in-docker.sh -i 'DIR="`pwd`" &&
 mkdir -p /build &&
-cd /build && "${DIR}"/configure &&
+cd /build && "${DIR}"/configure --disable-shared --enable-static &&
 make -j `nproc` distcheck AM_DEFAULT_VERBOSITY=1
+make install
+msecret --list-curves
 ' || exit 1
-

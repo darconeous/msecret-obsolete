@@ -308,5 +308,3 @@ main(void) {
 }
 
 #endif
-
-

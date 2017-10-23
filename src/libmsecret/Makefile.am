@@ -35,4 +35,3 @@ libmsecret_la_LDFLAGS = $(AM_LDFLAGS) $(OPENSSL_LDFLAGS)
 libmsecret_la_LIBADD = $(AM_LIBADD) $(OPENSSL_LIBS)
 
 DISTCLEANFILES = .deps Makefile
-

@@ -527,8 +527,7 @@ main(int argc, char * argv[])
 			BIGNUM *prime = BN_new();
 			MSECRET_Extract_Prime_BN(
 				prime,
-			    key_byte_length*8,
-				0,
+				key_byte_length*8,
 				key_selector,
 				master_secret, master_secret_len
 			);
@@ -539,8 +538,7 @@ main(int argc, char * argv[])
 			rsa = RSA_new();
 			MSECRET_Extract_RSA(
 				rsa,
-			    key_byte_length*8,
-				0,
+				key_byte_length*8,
 				key_selector,
 				master_secret, master_secret_len
 			);

@@ -24,4 +24,3 @@ RUN apt-get -y update \
 RUN ln -s /usr/bin/clang-3.8 /usr/bin/clang
 RUN ln -s /usr/bin/clang++-3.8 /usr/bin/clang++
 RUN ln -s /usr/bin/llvm-symbolizer-3.8 /usr/bin/llvm-symbolizer
-

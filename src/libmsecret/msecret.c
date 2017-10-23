@@ -8,9 +8,6 @@
 #include <string.h>
 #include <stdio.h>
 
-#define kMSECRET_OK        0
-#define kMSECRET_FAILED    1
-
 static uint8_t
 enclosing_mask_uint8(uint8_t x) {
 	x |= (x >> 1);
@@ -117,57 +114,27 @@ int
 MSECRET_Extract_Prime_BN(
 	BIGNUM *prime,
 	int bit_length,
-	int flags,
 	const MSECRET_KeySelector key_selector,
 	const uint8_t *ikm, size_t ikm_size
 ) {
-	static const int kSupportedFlags = 0
-#if MSECRET_PRIME_LEELIM
-		| MSECRET_PRIME_LEELIM
-#endif
-		| MSECRET_PRIME_STD_EXPONENT;
 	int ret = kMSECRET_FAILED;
 	MSECRET_KeySelector new_key_selector;
 	HMAC_SHA256_CTX hmac;
 	BN_CTX *ctx = BN_CTX_new();
 	BIGNUM *max = BN_CTX_get(ctx);
-	BIGNUM *e = NULL;
-	BIGNUM *r0 = NULL;
-	BIGNUM *r1 = NULL;
 
-	if (bit_length <= 0) {
+	if (bit_length <= 4) {
 		fprintf(stderr,"MSECRET_Extract_Prime_BN: Invalid bit length (%d)\n", bit_length);
 		goto bail;
 	}
 
-	if ((flags & ~kSupportedFlags) != 0) {
-		fprintf(stderr,"MSECRET_Extract_Prime_BN: Unexpected flags\n");
-		goto bail;
-	}
+	MSECRET_CalcKeySelector(
+		new_key_selector,
+		key_selector, sizeof(MSECRET_KeySelector),
+		"Prime_v1", 0
+	);
 
-	HMAC_SHA256_Init(&hmac);
-	HMAC_SHA256_UpdateKey(&hmac, key_selector, sizeof(MSECRET_KeySelector));
-	HMAC_SHA256_EndKey(&hmac);
-	HMAC_SHA256_StartMessage(&hmac);
-	HMAC_SHA256_UpdateMessage(&hmac, (const uint8_t*)"Prime:", 6);
-
-	if (flags & MSECRET_PRIME_STD_EXPONENT) {
-		e = BN_CTX_get(ctx);
-		r0 = BN_CTX_get(ctx);
-		r1 = BN_CTX_get(ctx);
-		BN_set_word(e, RSA_F4);
-		HMAC_SHA256_UpdateMessage(&hmac, (const uint8_t*)"GCD65537=0:", 11);
-	}
-
-#if MSECRET_PRIME_LEELIM
-	if (flags & MSECRET_PRIME_LEELIM) {
-		HMAC_SHA256_UpdateMessage(&hmac, (const uint8_t*)"LeeLim:", 7);
-	}
-#endif
-
-	HMAC_SHA256_EndMessage(new_key_selector, &hmac);
-
-	// Set our target strength.
+	// Set our target strength as 2^bit_length-1
 	BN_set_bit(max, bit_length);
 	BN_sub_word(max, 1);
 
@@ -179,38 +146,24 @@ MSECRET_Extract_Prime_BN(
 		ikm, ikm_size
 	);
 
-	// Make sure our starting point is odd and has
-	// the first two bits set (ensuring it is large).
+	// Make sure our starting point is odd.
 	BN_set_bit(prime, 0);
+
+	// Make sure the most-significant two bits are set.
+	// This ensures the resulting prime is large.
 	BN_set_bit(prime, bit_length-1);
 	BN_set_bit(prime, bit_length-2);
 
 	// Start looping through candidates.
-	for(;true;BN_add_word(prime, 2)) {
-		if (!BN_is_prime(prime, BN_prime_checks, NULL, ctx, NULL)) {
-			continue;
-		}
-
-#if MSECRET_PRIME_LEELIM
-        if (flags & MSECRET_PRIME_LEELIM) {
-			// TODO: Check that the prime is a "Lee/Lim" prime.
-			goto bail;
-		}
-#endif
-
-		if (e != NULL) {
-			BN_sub(r0, prime, BN_value_one());
-			BN_gcd(r1, r0, e, ctx);
-			if (!BN_is_one(r1)) {
-				fprintf(stderr,"Note: Skipped prime where (p-1) was divisible by 65537\n");
-				continue;
-			}
-		}
-
-		break;
+	for (
+		; !BN_is_prime_fasttest(prime, BN_prime_checks, NULL, ctx, NULL, 1)
+		; BN_add_word(prime, 2)
+	) {
+		// All the work is done in the for() expression above
 	}
 
 	ret = kMSECRET_OK;
+
 bail:
 
 	BN_CTX_free(ctx);
@@ -218,133 +171,26 @@ bail:
 	return ret;
 }
 
-#if 0
-void
-MSECRET_Extract_RSA_X931(
-	RSA *rsa,
-	int mod_length,
-	const MSECRET_KeySelector key_selector,
-	const uint8_t *ikm, size_t ikm_size
-) {
-	MSECRET_KeySelector new_key_selector;
-	int bitsp, bitsq;
-	int i;
-	BN_CTX *ctx = BN_CTX_new();
-	BIGNUM *xp[3] = { BN_CTX_get(ctx), BN_CTX_get(ctx), BN_CTX_get(ctx) };
-	BIGNUM *xq[3] = { BN_CTX_get(ctx), BN_CTX_get(ctx), BN_CTX_get(ctx) };
-	BIGNUM *max = BN_CTX_get(ctx);
-	BIGNUM *max101 = BN_CTX_get(ctx);
-
-	if (mod_length <= 0) {
-		fprintf(stderr, "MSECRET_Extract_RSA_X931: Invalid mod length (%d)\n", mod_length);
-		// TODO: Change this to return an error at some point.
-		abort();
-	}
-
-	bitsp = (mod_length + 1) / 2;
-	bitsq = mod_length - bitsp;
-
-	if (rsa->e == NULL) {
-		rsa->e = BN_new();
-		BN_set_word(rsa->e, RSA_F4);
-	}
-
-	BN_set_bit(max101, 102);
-	BN_sub_word(max101, 1);
-
-	BN_set_bit(max, bitsp);
-	BN_sub_word(max, 1);
-
-	for (i = 0; i < 3; i++) {
-		char sel_str[] = "Xp0";
-
-		// Mutate the above string to "Xp1", "Xp2"...
-		sel_str[2] += i;
-
-		MSECRET_CalcKeySelector(
-			new_key_selector,
-			key_selector, sizeof(MSECRET_KeySelector),
-			sel_str, 0
-		);
-
-		MSECRET_Extract_Integer_BN(
-			xp[i],
-			(i == 0)
-				? max
-				: max101,
-			new_key_selector,
-			ikm, ikm_size
-		);
-	}
-
-	BN_set_bit(xp[0], 0);
-	BN_set_bit(xp[0], bitsp - 1);
-	BN_set_bit(xp[0], bitsp - 2);
-
-	BN_zero(max);
-	BN_set_bit(max, bitsq);
-	BN_sub_word(max, 1);
-
-	for (i = 0; i < 3; i++) {
-		char sel_str[] = "Xq0";
-
-		// Mutate the above string to "Xq1", "Xq2"...
-		sel_str[2] += i;
-
-		MSECRET_CalcKeySelector(
-			new_key_selector,
-			key_selector, sizeof(MSECRET_KeySelector),
-			sel_str, 0
-		);
-
-		MSECRET_Extract_Integer_BN(
-			xq[i],
-			(i == 0)
-				? max
-				: max101,
-			new_key_selector,
-			ikm, ikm_size
-		);
-	}
-
-	BN_set_bit(xq[0], 0);
-	BN_set_bit(xq[0], bitsq - 1);
-	BN_set_bit(xq[0], bitsq - 2);
-
-	RSA_X931_derive_ex(
-		rsa,
-		NULL, NULL,
-		NULL, NULL,
-		xp[1], xp[2], xp[0],
-		xq[1], xq[2], xq[0],
-		rsa->e,
-		NULL
-	);
-
-	BN_CTX_free(ctx);
-}
-#endif
-
-
 int
 MSECRET_Extract_RSA(
 	RSA *rsa,
 	int mod_length,
-	int flags,
 	const MSECRET_KeySelector key_selector,
 	const uint8_t *ikm, size_t ikm_size
 ) {
-	static const int kSupportedFlags = 0;
+	/* This implementation is largely based on the implementation
+	 * from OpenSSL's `RSA_generate_key()` method, as seen here:
+	 *
+	 * https://opensource.apple.com/source/OpenSSL097/OpenSSL097-16/openssl/crypto/rsa/rsa_gen.c
+	 */
+
 	int ret = kMSECRET_FAILED;
-	// TODO: Review http://www.opensource.apple.com/source/OpenSSL097/OpenSSL097-16/openssl/crypto/rsa/rsa_gen.c
 	MSECRET_KeySelector prime_key_selector;
 	int bitsp, bitsq;
 	BN_CTX *ctx = BN_CTX_new();
-
-	if ((flags & ~kSupportedFlags) != 0) {
-		fprintf(stderr,"MSECRET_Extract_RSA: Unexpected flags\n");
-		goto bail;
-	}
+	BIGNUM *r0 = BN_CTX_get(ctx);
+	BIGNUM *r1 = BN_CTX_get(ctx);
+	BIGNUM *r2 = BN_CTX_get(ctx);
 
 	if (mod_length <= 0) {
 		fprintf(stderr,"MSECRET_Extract_RSA: Invalid mod length (%d)\n", mod_length);
@@ -364,44 +210,69 @@ MSECRET_Extract_RSA(
 
 	if (rsa->e == NULL) {
 		rsa->e = BN_new();
-		BN_set_word(rsa->e, RSA_F4);
 	}
 
-	MSECRET_CalcKeySelector(
-		prime_key_selector,
-		key_selector, sizeof(MSECRET_KeySelector),
-		"RSA:a", 5
-	);
+	// We always use 65537 as `e`.
+	BN_set_word(rsa->e, RSA_F4);
 
-	ret = MSECRET_Extract_Prime_BN(
-		rsa->p,
-		bitsp,
-		flags | MSECRET_PRIME_STD_EXPONENT,
-		prime_key_selector,
-		ikm, ikm_size
-	);
+	// Copy over the key selector. We will end up
+	// mutating this, possibly multiple times to
+	// satisfy the maximum.
+	memcpy(prime_key_selector, key_selector, sizeof(MSECRET_KeySelector));
 
-	if (ret != kMSECRET_OK) {
-		goto bail;
-	}
+	// Calculate the first prime.
+	do {
+		// Mutate the key selector.
+		MSECRET_CalcKeySelector(
+			prime_key_selector,
+			prime_key_selector, sizeof(MSECRET_KeySelector),
+			"RSA_v1", 0
+		);
 
-	MSECRET_CalcKeySelector(
-		prime_key_selector,
-		key_selector, sizeof(MSECRET_KeySelector),
-		"RSA:b", 5
-	);
+		// Extract a prime number.
+		ret = MSECRET_Extract_Prime_BN(
+			rsa->p,
+			bitsp,
+			prime_key_selector,
+			ikm, ikm_size
+		);
 
-	ret = MSECRET_Extract_Prime_BN(
-		rsa->q,
-		bitsq,
-		flags | MSECRET_PRIME_STD_EXPONENT,
-		prime_key_selector,
-		ikm, ikm_size
-	);
+		if (ret != kMSECRET_OK) {
+			goto bail;
+		}
 
-	if (ret != kMSECRET_OK) {
-		goto bail;
-	}
+		// Verify that the prime is suitable.
+		// If it isn't, we try again.
+		BN_sub(r0, rsa->p, BN_value_one());
+		BN_gcd(r1, r0, rsa->e, ctx);
+	} while (!BN_is_one(r1));
+
+	// Calculate the second prime.
+	do {
+		// Mutate the key selector.
+		MSECRET_CalcKeySelector(
+			prime_key_selector,
+			prime_key_selector, sizeof(MSECRET_KeySelector),
+			"RSA_v1", 0
+		);
+
+		// Extract a prime number.
+		ret = MSECRET_Extract_Prime_BN(
+			rsa->q,
+			bitsq,
+			prime_key_selector,
+			ikm, ikm_size
+		);
+
+		if (ret != kMSECRET_OK) {
+			goto bail;
+		}
+
+		// Verify that the prime is suitable.
+		// If it isn't, we try again.
+		BN_sub(r0, rsa->q, BN_value_one());
+		BN_gcd(r1, r0, rsa->e, ctx);
+	} while (!BN_is_one(r1));
 
 	assert(BN_cmp(rsa->p, rsa->q) != 0);
 
@@ -413,34 +284,16 @@ MSECRET_Extract_RSA(
 		rsa->q=tmp;
 	}
 
-#if 0
-   // Derive the rest.
-	RSA_X931_derive_ex(
-		rsa,
-		NULL, NULL,
-		NULL, NULL,
-		NULL, NULL, NULL,
-		NULL, NULL, NULL,
-		rsa->e,
-		NULL
-	);
-#else
-	BIGNUM *r0 = BN_CTX_get(ctx);
-	BIGNUM *r1 = BN_CTX_get(ctx);
-	BIGNUM *r2 = BN_CTX_get(ctx);
-
+	// Calculate N
 	if (rsa->n == NULL) {
 		rsa->n = BN_new();
 	}
-
-	if (rsa->d == NULL) {
-		rsa->d = BN_new();
-	}
-
-	// Calculate N
 	BN_mul(rsa->n, rsa->p, rsa->q, ctx);
 
 	// Calculate D
+	if (rsa->d == NULL) {
+		rsa->d = BN_new();
+	}
 	BN_sub(r0, rsa->n, rsa->p);
 	BN_sub(r1, r0, rsa->q);
 	BN_add(r0, r1, BN_value_one());
@@ -466,8 +319,6 @@ MSECRET_Extract_RSA(
 	}
 	BN_mod_inverse(rsa->iqmp,rsa->q,rsa->p,ctx);
 
-#endif
-
 	ret = kMSECRET_OK;
 
 bail:
@@ -475,11 +326,12 @@ bail:
 	return ret;
 }
 
-void MSECRET_Extract_EC_KEY(
+int MSECRET_Extract_EC_KEY(
 	EC_KEY *ec_key_out,
 	const MSECRET_KeySelector key_selector,
 	const uint8_t *ikm, size_t ikm_size
 ) {
+	int ret = kMSECRET_FAILED;
 	BN_CTX *ctx = BN_CTX_new();
 	const EC_GROUP *group = EC_KEY_get0_group(ec_key_out);
 	BIGNUM *order = BN_CTX_get(ctx);
@@ -489,18 +341,19 @@ void MSECRET_Extract_EC_KEY(
 
 	if (group == NULL) {
 		fprintf(stderr,"MSECRET_Extract_EC_KEY: No group specified\n");
-		// TODO: Change this to return an error at some point.
-		abort();
+		goto bail;
 	}
 
 	if (!EC_GROUP_get_order(group, order, ctx)) {
 		fprintf(stderr,"MSECRET_Extract_EC_KEY: Unable to extract order\n");
-		// TODO: Change this to return an error at some point.
-		abort();
+		goto bail;
 	}
 
-	// TODO: Derive a new selector based on the group...?
-	memcpy(new_key_selector, key_selector, sizeof(MSECRET_KeySelector));
+	MSECRET_CalcKeySelector(
+		new_key_selector,
+		key_selector, sizeof(MSECRET_KeySelector),
+		"EC_v1", 0
+	);
 
 	MSECRET_Extract_Integer_BN(
 		privateKey,
@@ -514,20 +367,26 @@ void MSECRET_Extract_EC_KEY(
 	ec_pub_key = EC_POINT_new(group);
 	if (!EC_POINT_mul(group, ec_pub_key, privateKey, NULL, NULL, NULL)) {
 		fprintf(stderr,"Error at EC_POINT_mul.\n");
-		// TODO: Change this to return an error at some point.
-		abort();
+		goto bail;
 	}
 
 	EC_KEY_set_public_key(ec_key_out, ec_pub_key);
 
 	if (!EC_KEY_check_key(ec_key_out)) {
 		fprintf(stderr,"Error at EC_KEY_check_key.\n");
-		// TODO: Change this to return an error at some point.
-		abort();
+		goto bail;
 	}
 
-	EC_POINT_free(ec_pub_key);
+	ret = kMSECRET_OK;
+
+bail:
+	if (ec_pub_key != NULL) {
+		EC_POINT_free(ec_pub_key);
+	}
+
 	BN_CTX_free(ctx);
+
+	return ret;
 }
 
 #if MSECRET_UNIT_TEST
