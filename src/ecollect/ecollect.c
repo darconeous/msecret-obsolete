@@ -9,10 +9,11 @@
  * file that can later be used directly as keying material. It allows you
  * to cherry-pick the entropy sources you use for key generation rather
  * than relying on operating system methods. Its results are reproducable
- * given the same input. The tool may be invoked multiple times to pull
- * entropy from multiple different sources. You may also pull entropy
- * from device files like `/dev/urandom`, pressing CTRL-C once you feel
- * you have collected enough entropy.
+ * given the same input, but this behavior is only guaranteed when using
+ * the same version of the tool. The tool may be invoked multiple times
+ * to pull entropy from multiple different sources. You may also pull
+ * entropy from device files like `/dev/urandom`, pressing CTRL-C once
+ * you feel you have collected enough entropy.
  *
  * # Usage #
  *
@@ -87,9 +88,9 @@ xorcpy(void *restrict dst, const void *restrict src, size_t n)
 }
 
 static void
-mix_pool(uint8_t* pool, int pool_len)
+mix_pool(uint8_t* pool, const int pool_len)
 {
-	uint8_t hashval[SHA256_DIGEST_LENGTH];
+	uint8_t hashval[SHA512_DIGEST_LENGTH];
 
 #if DEBUG
 	fprintf(stderr, "pool-in:  ");
@@ -98,7 +99,8 @@ mix_pool(uint8_t* pool, int pool_len)
 #endif
 
 	if (pool_len <= SHA256_DIGEST_LENGTH) {
-		// Pool is small enough that we can just hash it once and be done with it.
+		// Pool is small enough that we can just hash it once
+		// with SHA256 and be done with it.
 
 		SHA256_CTX hash;
 
@@ -107,6 +109,19 @@ mix_pool(uint8_t* pool, int pool_len)
 		SHA256_Final(hashval, &hash);
 
 		memcpy(pool, hashval, pool_len);
+
+	} else if (pool_len <= SHA512_DIGEST_LENGTH) {
+		// Pool is small enough that we can just hash it once
+		// with SHA512 and be done with it.
+
+		SHA512_CTX hash;
+
+		SHA512_Init(&hash);
+		SHA512_Update(&hash, pool, pool_len);
+		SHA512_Final(hashval, &hash);
+
+		memcpy(pool, hashval, pool_len);
+
 
 	} else {
 		// Pool is larger than the digest length, so we need to use a
@@ -119,29 +134,44 @@ mix_pool(uint8_t* pool, int pool_len)
 		// the total amount of entropy present in the system while
 		// ensuring that there are no correlations in output.
 
-		int i;
+		int i, j;
 		HMAC_SHA256_CTX hmac;
 
-		HMAC_SHA256_Init(&hmac);
-		HMAC_SHA256_UpdateKey(&hmac, pool, pool_len);
-		HMAC_SHA256_EndKey(&hmac);
-
+		// Initialize hashval to all zeros. This gets updated
+		// per iteration for feedback into the next step.
 		memset(hashval, 0, sizeof(hashval));
 
-		for (i = 0; i < (pool_len + SHA256_DIGEST_LENGTH - 1) / SHA256_DIGEST_LENGTH; i++) {
-			int offset = i * SHA256_DIGEST_LENGTH;
-			int len = SHA256_DIGEST_LENGTH;
+		// Multiple rounds are used to ensure that the entropy
+		// is well distributed across the pool. Note that
+		// this is only used for pool sizes larger than 64
+		// bytes (512 bits): in the smaller cases we end up
+		// just using SHA-256 or SHA-512 directly.
+		// Number of rounds depends on how large the pool is.
+		for (j = 0; j < (pool_len + SHA256_DIGEST_LENGTH/2) / SHA256_DIGEST_LENGTH; j++) {
+			// We use the entire state of the pool as our key.
+			// This helps us ensure that as much entropy as
+			// possible is mixed across the rounds.
+			HMAC_SHA256_Init(&hmac);
+			HMAC_SHA256_UpdateKey(&hmac, pool, pool_len);
+			HMAC_SHA256_EndKey(&hmac);
 
-			if (offset + len > pool_len) {
-				len = pool_len - offset;
+			for (i = 0; i < (pool_len + SHA256_DIGEST_LENGTH - 1) / SHA256_DIGEST_LENGTH; i++) {
+				int offset = i * SHA256_DIGEST_LENGTH;
+				int len = SHA256_DIGEST_LENGTH;
+
+				if (offset + len > pool_len) {
+					len = pool_len - offset;
+				}
+
+				HMAC_SHA256_StartMessage(&hmac);
+				// Feedback from previous iteration.
+				HMAC_SHA256_UpdateMessage(&hmac, hashval, SHA256_DIGEST_LENGTH);
+				// Add the next digest-sized block from the pool.
+				HMAC_SHA256_UpdateMessage(&hmac, pool + offset, len);
+				HMAC_SHA256_EndMessage(hashval, &hmac);
+
+				memcpy(pool + offset, hashval, len);
 			}
-
-			HMAC_SHA256_StartMessage(&hmac);
-			HMAC_SHA256_UpdateMessage(&hmac, hashval, sizeof(hashval));
-			HMAC_SHA256_UpdateMessage(&hmac, pool + offset, len);
-			HMAC_SHA256_EndMessage(hashval, &hmac);
-
-			memcpy(pool + offset, hashval, len);
 		}
 	}
 
