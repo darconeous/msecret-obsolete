@@ -76,6 +76,13 @@ state of the file and mixes additional entropy into it.
 	# required to change their passwords, the index is appended to the
 	# key identifier.
     ./msecret -i secret.bin --format-b32 -l 15 -k "com.etrade.myusername.1"
+	
+	# Derive the 8-digit smartcard admin pin for a the smart
+	# card with the serial number 03294852.
+    ./msecret -i secret.bin \
+		--dec-zero-fill 8 \
+		--key-max 99999999 \
+		-k "smartcard.adminpin.03294852"
 
     # Derive a bitcoin address named "Savings-1"
     ./msecret -i secret.bin --bitcoin -k "Savings-1"

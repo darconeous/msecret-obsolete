@@ -551,6 +551,16 @@ main(int argc, char * argv[])
 				master_secret, master_secret_len
 			);
 
+			if (outputPrivateKey) {
+				const BIGNUM* ec_private_key;
+				ec_private_key = EC_KEY_get0_private_key(ec_key);
+
+				assert(output_key != NULL);
+
+				key_byte_length = BN_num_bytes(ec_private_key);
+				BN_bn2bin(ec_private_key, output_key);
+			}
+
 		} else {
 			// Extracts a random key with a length of
 			// key_byte_length.
@@ -575,30 +585,22 @@ main(int argc, char * argv[])
 			uint8_t tmp[SHA256_DIGEST_LENGTH];
 			EVP_MD_CTX md_ctx;
 
-			const BIGNUM* ec_private_key;
-			ec_private_key = EC_KEY_get0_private_key(ec_key);
 			assert(output_key != NULL);
-			assert(key_byte_length >= 32);
-			BN_bn2bin(ec_private_key, output_key);
-			key_byte_length = 32;
-
-			EVP_MD_CTX_init(&md_ctx);
-			SHA256_Data(output_key, key_byte_length, (char*)&tmp);
-			SHA256_Data(tmp, SHA256_DIGEST_LENGTH, (char*)tmp);
+			assert(key_byte_length == 32);
 
 			output_key = realloc(output_key, key_byte_length+6);
-			memmove(output_key+1, output_key, key_byte_length);
+			memmove(output_key + 1, output_key, key_byte_length);
 
 			output_key[0] = 0x80;
 			key_byte_length += 1;
 
+			EVP_MD_CTX_init(&md_ctx);
 			EVP_DigestInit(&md_ctx, EVP_sha256());
-			EVP_DigestUpdate(&md_ctx,output_key,key_byte_length);
-			EVP_DigestFinal(&md_ctx,tmp,NULL);
+			EVP_DigestUpdate(&md_ctx, output_key, key_byte_length);
+			EVP_DigestFinal(&md_ctx, tmp, NULL);
 			EVP_DigestInit(&md_ctx, EVP_sha256());
-			EVP_DigestUpdate(&md_ctx,tmp,SHA256_DIGEST_LENGTH);
-			EVP_DigestFinal(&md_ctx,tmp,NULL);
-
+			EVP_DigestUpdate(&md_ctx, tmp, SHA256_DIGEST_LENGTH);
+			EVP_DigestFinal(&md_ctx, tmp, NULL);
 			EVP_MD_CTX_cleanup(&md_ctx);
 
 			memcpy(output_key+key_byte_length, tmp, 4);
@@ -609,7 +611,7 @@ main(int argc, char * argv[])
 			const EC_POINT *ec_pub_key = NULL;
 			uint8_t byte_x[32], byte_y[32];
 			EVP_MD_CTX md_ctx;
-			char hdr = 0x04;
+			const char hdr = 0x04;
 			uint8_t tmp[SHA256_DIGEST_LENGTH];
 			BIGNUM bn_key;
 			BIGNUM bn_x, bn_y;
