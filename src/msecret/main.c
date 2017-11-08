@@ -73,15 +73,15 @@ static arg_list_item_t option_list[] = {
 	{   0, "format-der",	NULL, "Output DER"				},
 	{   0, "format-pem",	NULL, "Output PEM"				},
 	{   0, "format-rsa",	NULL, "Output PEM (RSA)"				},
+	{ 0, "private",	NULL, "Output private key"				},
+	{ 0, "public",	NULL, "Output public key (default)"				},
 	{ 0, "dec-zero-fill", "X", "Zero fill key to X places"},
 	{ 0, "integer",	NULL, "Derive a large integer (default)"				},
 	{ 0, "prime",	NULL, "Derive a large prime"				},
-	{ 0, "ec", "curve-name", "Derive a EC private key"				},
 	{ 0, "rsa",	NULL, "Derive a RSA key"				},
 	{ 0, "bitcoin",	NULL, "Derive a bitcoin address"				},
+	{ 0, "ec", "curve-name", "Derive a EC private key"				},
 	{ 0, "list-curves", NULL, "Print out list of supported curves"				},
-	{ 0, "private",	NULL, "Output private key"				},
-	{ 0, "public",	NULL, "Output public key (default)"				},
 	{ 0 }
 };
 
