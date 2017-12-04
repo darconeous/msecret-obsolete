@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include "hmac_sha/hmac_sha256.h"
+#include "hmac_sha256.h"
 
 typedef uint8_t LKDF_SHA256_KeySelector[HMAC_SHA256_DIGEST_LENGTH];
 

@@ -7,6 +7,7 @@ AM_CPPFLAGS = \
 	-I$(top_srcdir)/src \
 	-I$(top_srcdir)/src/util \
 	-I$(top_srcdir)/third_party \
+	-I$(top_srcdir)/third_party/hmac_sha \
 	$(MISSING_CPPFLAGS) \
 	$(NULL)
 
@@ -15,8 +16,8 @@ lib_LTLIBRARIES = libmsecret.la
 AM_LIBS = $(CODE_COVERAGE_LDFLAGS)
 AM_CFLAGS = $(CFLAGS) $(CODE_COVERAGE_CFLAGS)
 
-#pkgconfigdir = ${prefix}/lib/pkgconfig
-#pkgconfig_DATA = libmsecret.pc
+pkgconfigdir = ${prefix}/lib/pkgconfig
+pkgconfig_DATA = libmsecret.pc
 
 libmsecret_la_SOURCES = \
 	msecret.c \
@@ -28,6 +29,8 @@ libmsecret_la_SOURCES = \
 pkginclude_HEADERS = \
 	msecret.h \
 	lkdf.h \
+	$(top_srcdir)/third_party/hmac_sha/hmac_sha256.h \
+	$(top_srcdir)/third_party/hmac_sha/sha2.h \
 	$(NULL)
 
 libmsecret_la_CPPFLAGS = $(AM_CPPFLAGS) $(OPENSSL_INCLUDES)

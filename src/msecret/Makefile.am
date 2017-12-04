@@ -3,6 +3,7 @@ AM_CPPFLAGS = \
 	-I$(top_srcdir)/src \
 	-I$(top_srcdir)/src/util \
 	-I$(top_srcdir)/third_party \
+	-I$(top_srcdir)/third_party/hmac_sha \
 	$(MISSING_CPPFLAGS) \
 	$(NULL)
 

@@ -52,5 +52,5 @@ AC_FUNC_MMAP
 AC_FUNC_REALLOC
 AC_CHECK_FUNCS([gettimeofday memmove memset strchr strerror strtol])
 
-AC_CONFIG_FILES([Makefile src/Makefile doc/Makefile src/ecollect/Makefile third_party/Makefile src/libmsecret/Makefile src/msecret/Makefile])
+AC_CONFIG_FILES([Makefile src/Makefile doc/Makefile src/ecollect/Makefile third_party/Makefile src/libmsecret/Makefile src/libmsecret/libmsecret.pc src/msecret/Makefile])
 AC_OUTPUT
