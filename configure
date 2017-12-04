@@ -13324,7 +13324,7 @@ fi
 done
 
 
-ac_config_files="$ac_config_files Makefile src/Makefile doc/Makefile src/ecollect/Makefile third_party/Makefile src/libmsecret/Makefile src/msecret/Makefile"
+ac_config_files="$ac_config_files Makefile src/Makefile doc/Makefile src/ecollect/Makefile third_party/Makefile src/libmsecret/Makefile src/libmsecret/libmsecret.pc src/msecret/Makefile"
 
 cat >confcache <<\_ACEOF
 # This file is a shell script that caches the results of configure
@@ -14348,6 +14348,7 @@ do
     "src/ecollect/Makefile") CONFIG_FILES="$CONFIG_FILES src/ecollect/Makefile" ;;
     "third_party/Makefile") CONFIG_FILES="$CONFIG_FILES third_party/Makefile" ;;
     "src/libmsecret/Makefile") CONFIG_FILES="$CONFIG_FILES src/libmsecret/Makefile" ;;
+    "src/libmsecret/libmsecret.pc") CONFIG_FILES="$CONFIG_FILES src/libmsecret/libmsecret.pc" ;;
     "src/msecret/Makefile") CONFIG_FILES="$CONFIG_FILES src/msecret/Makefile" ;;
 
   *) as_fn_error $? "invalid argument: \`$ac_config_target'" "$LINENO" 5;;
